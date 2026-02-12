@@ -3,6 +3,8 @@ package auth
 import (
 	"errors"
 
+	"nathanbeddoewebdev/vpsm/internal/util"
+
 	"github.com/zalando/go-keyring"
 )
 
@@ -18,12 +20,12 @@ func NewKeyringStore(serviceName string) *KeyringStore {
 }
 
 func (k *KeyringStore) SetToken(provider string, token string) error {
-	providerKey := NormalizeProvider(provider)
+	providerKey := util.NormalizeKey(provider)
 	return keyring.Set(k.serviceName, providerKey, token)
 }
 
 func (k *KeyringStore) GetToken(provider string) (string, error) {
-	providerKey := NormalizeProvider(provider)
+	providerKey := util.NormalizeKey(provider)
 	token, err := keyring.Get(k.serviceName, providerKey)
 	if err == nil {
 		return token, nil
@@ -35,7 +37,7 @@ func (k *KeyringStore) GetToken(provider string) (string, error) {
 }
 
 func (k *KeyringStore) DeleteToken(provider string) error {
-	providerKey := NormalizeProvider(provider)
+	providerKey := util.NormalizeKey(provider)
 	err := keyring.Delete(k.serviceName, providerKey)
 	if errors.Is(err, keyring.ErrNotFound) {
 		return ErrTokenNotFound

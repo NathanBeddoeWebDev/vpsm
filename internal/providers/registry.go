@@ -3,23 +3,20 @@ package providers
 import (
 	"fmt"
 	"nathanbeddoewebdev/vpsm/internal/domain"
-	"strings"
+	"nathanbeddoewebdev/vpsm/internal/services/auth"
+	"nathanbeddoewebdev/vpsm/internal/util"
 	"sync"
 )
 
-type Factory func() (domain.Provider, error)
+type Factory func(store auth.Store) (domain.Provider, error)
 
 var (
 	mu       sync.RWMutex
 	registry = map[string]Factory{}
 )
 
-func normalize(name string) string {
-	return strings.ToLower(strings.TrimSpace(name))
-}
-
 func Register(name string, factory Factory) {
-	normalizedName := normalize(name)
+	normalizedName := util.NormalizeKey(name)
 	if normalizedName == "" {
 		panic("providers: empty provider name")
 	}
@@ -36,8 +33,8 @@ func Register(name string, factory Factory) {
 	registry[normalizedName] = factory
 }
 
-func Get(name string) (domain.Provider, error) {
-	normalizedName := normalize(name)
+func Get(name string, store auth.Store) (domain.Provider, error) {
+	normalizedName := util.NormalizeKey(name)
 	mu.RLock()
 	factory, ok := registry[normalizedName]
 	mu.RUnlock()
@@ -46,7 +43,7 @@ func Get(name string) (domain.Provider, error) {
 		return nil, fmt.Errorf("providers: unknown provider %q", name)
 	}
 
-	provider, err := factory()
+	provider, err := factory(store)
 	if err != nil {
 		return nil, err
 	}

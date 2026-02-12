@@ -2,7 +2,8 @@ package auth
 
 import (
 	"errors"
-	"strings"
+
+	"nathanbeddoewebdev/vpsm/internal/util"
 )
 
 const ServiceName = "vpsm"
@@ -15,6 +16,12 @@ type Store interface {
 	DeleteToken(provider string) error
 }
 
+// DefaultStore returns the standard auth store backed by the OS keychain.
+func DefaultStore() Store {
+	return NewKeyringStore(ServiceName)
+}
+
+// NormalizeProvider normalizes a provider name for consistent key lookup.
 func NormalizeProvider(provider string) string {
-	return strings.ToLower(strings.TrimSpace(provider))
+	return util.NormalizeKey(provider)
 }

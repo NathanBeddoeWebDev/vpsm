@@ -6,6 +6,7 @@ import (
 	"text/tabwriter"
 
 	"nathanbeddoewebdev/vpsm/internal/providers"
+	"nathanbeddoewebdev/vpsm/internal/services/auth"
 
 	"github.com/spf13/cobra"
 )
@@ -17,12 +18,8 @@ func ListCommand() *cobra.Command {
 		Long:  `List all servers from the specified provider.`,
 		Run: func(cmd *cobra.Command, args []string) {
 			providerName := cmd.Flag("provider").Value.String()
-			if providerName == "" {
-				fmt.Fprintln(os.Stderr, "Error: --provider flag is required")
-				return
-			}
 
-			provider, err := providers.Get(providerName)
+			provider, err := providers.Get(providerName, auth.DefaultStore())
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				return
@@ -59,9 +56,6 @@ func ListCommand() *cobra.Command {
 			w.Flush()
 		},
 	}
-
-	cmd.Flags().String("provider", "", "The provider to use (required)")
-	cmd.MarkFlagRequired("provider")
 
 	return cmd
 }

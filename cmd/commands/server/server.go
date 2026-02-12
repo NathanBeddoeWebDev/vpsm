@@ -28,5 +28,8 @@ to quickly create a Cobra application.`,
 	cmd.AddCommand(DeleteCommand())
 	cmd.AddCommand(ListCommand())
 
+	cmd.PersistentFlags().String("provider", "", "The provider to use (required)")
+	cmd.MarkPersistentFlagRequired("provider")
+
 	return cmd
 }

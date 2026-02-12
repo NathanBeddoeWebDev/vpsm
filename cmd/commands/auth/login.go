@@ -51,7 +51,7 @@ Example:
 				return
 			}
 
-			store := auth.NewKeyringStore(auth.ServiceName)
+			store := auth.DefaultStore()
 			if err := store.SetToken(provider, token); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return

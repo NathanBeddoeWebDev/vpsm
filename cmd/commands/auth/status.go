@@ -20,7 +20,7 @@ func StatusCommand() *cobra.Command {
 Example:
   vpsm auth status`,
 		Run: func(cmd *cobra.Command, args []string) {
-			store := auth.NewKeyringStore(auth.ServiceName)
+			store := auth.DefaultStore()
 			providerNames := providers.List()
 
 			if len(providerNames) == 0 {

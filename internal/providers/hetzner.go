@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const hetznerHTTPTimeout = 30 * time.Second
+
 // create a struct which follows the Provider interface
 const hetznerBaseURL = "https://api.hetzner.cloud/v1"
 
@@ -56,23 +58,18 @@ type HetznerProvider struct {
 }
 
 func RegisterHetzner() {
-	Register("hetzner", func() (domain.Provider, error) {
-		store := auth.NewKeyringStore(auth.ServiceName)
+	Register("hetzner", func(store auth.Store) (domain.Provider, error) {
 		token, err := store.GetToken("hetzner")
 		if err != nil {
 			return nil, fmt.Errorf("hetzner auth: %w", err)
 		}
 
 		return &HetznerProvider{
-			client:  &http.Client{},
+			client:  &http.Client{Timeout: hetznerHTTPTimeout},
 			baseURL: hetznerBaseURL,
 			token:   token,
 		}, nil
 	})
-}
-
-func (h *HetznerProvider) Authenticate() error {
-	return fmt.Errorf("not implemented")
 }
 
 func (h *HetznerProvider) GetDisplayName() string {
