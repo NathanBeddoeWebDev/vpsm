@@ -87,6 +87,10 @@ func TestListServerTypes_HappyPath(t *testing.T) {
 	st1["cores"] = 2
 	st1["memory"] = 2.0
 	st1["disk"] = 40
+	st1["locations"] = []interface{}{
+		testServerTypeLocationJSON(1, "fsn1", nil),
+		testServerTypeLocationJSON(2, "nbg1", nil),
+	}
 	st1["prices"] = []interface{}{
 		map[string]interface{}{
 			"location":      "fsn1",
@@ -104,6 +108,9 @@ func TestListServerTypes_HappyPath(t *testing.T) {
 	st2["cores"] = 2
 	st2["memory"] = 4.0
 	st2["disk"] = 40
+	st2["locations"] = []interface{}{
+		testServerTypeLocationJSON(1, "fsn1", nil),
+	}
 	st2["prices"] = []interface{}{
 		map[string]interface{}{
 			"location":      "fsn1",
@@ -133,16 +140,96 @@ func TestListServerTypes_HappyPath(t *testing.T) {
 			ID: "1", Name: "cpx11", Description: "cpx11",
 			Cores: 2, Memory: 2.0, Disk: 40, Architecture: "x86",
 			PriceMonthly: "3.92", PriceHourly: "0.0064",
+			Locations: []string{"fsn1", "nbg1"},
 		},
 		{
 			ID: "2", Name: "cax11", Description: "cax11",
 			Cores: 2, Memory: 4.0, Disk: 40, Architecture: "arm",
 			PriceMonthly: "3.29", PriceHourly: "0.0055",
+			Locations: []string{"fsn1"},
 		},
 	}
 
 	if diff := cmp.Diff(want, serverTypes); diff != "" {
 		t.Errorf("server types mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestListServerTypes_ExcludesDeprecatedLocations(t *testing.T) {
+	st := testServerTypeJSON(1, "cpx11", "x86")
+	st["locations"] = []interface{}{
+		testServerTypeLocationJSON(1, "fsn1", map[string]interface{}{
+			"announced":         "2024-01-01T00:00:00+00:00",
+			"unavailable_after": "2024-06-01T00:00:00+00:00",
+		}),
+		testServerTypeLocationJSON(2, "nbg1", nil),
+	}
+	st["prices"] = []interface{}{
+		map[string]interface{}{
+			"location":      "fsn1",
+			"price_hourly":  map[string]interface{}{"net": "0.0054", "gross": "0.0064"},
+			"price_monthly": map[string]interface{}{"net": "3.29", "gross": "3.92"},
+		},
+		map[string]interface{}{
+			"location":      "nbg1",
+			"price_hourly":  map[string]interface{}{"net": "0.0054", "gross": "0.0064"},
+			"price_monthly": map[string]interface{}{"net": "3.29", "gross": "3.92"},
+		},
+	}
+
+	response := map[string]interface{}{
+		"server_types": []interface{}{st},
+	}
+
+	srv := newTestAPI(t, response)
+	provider := newTestHetznerProvider(srv.URL, "test-token")
+
+	serverTypes, err := provider.ListServerTypes()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(serverTypes) != 1 {
+		t.Fatalf("expected 1 server type, got %d", len(serverTypes))
+	}
+
+	// fsn1 is deprecated (unavailable_after is in the past), only nbg1 should remain.
+	want := []string{"nbg1"}
+	if diff := cmp.Diff(want, serverTypes[0].Locations); diff != "" {
+		t.Errorf("locations mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestListServerTypes_FallsBackToPricesWhenNoLocations(t *testing.T) {
+	st := testServerTypeJSON(1, "cpx11", "x86")
+	st["locations"] = []interface{}{} // empty locations array
+	st["prices"] = []interface{}{
+		map[string]interface{}{
+			"location":      "fsn1",
+			"price_hourly":  map[string]interface{}{"net": "0.0054", "gross": "0.0064"},
+			"price_monthly": map[string]interface{}{"net": "3.29", "gross": "3.92"},
+		},
+	}
+
+	response := map[string]interface{}{
+		"server_types": []interface{}{st},
+	}
+
+	srv := newTestAPI(t, response)
+	provider := newTestHetznerProvider(srv.URL, "test-token")
+
+	serverTypes, err := provider.ListServerTypes()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(serverTypes) != 1 {
+		t.Fatalf("expected 1 server type, got %d", len(serverTypes))
+	}
+
+	want := []string{"fsn1"}
+	if diff := cmp.Diff(want, serverTypes[0].Locations); diff != "" {
+		t.Errorf("locations mismatch (-want +got):\n%s", diff)
 	}
 }
 

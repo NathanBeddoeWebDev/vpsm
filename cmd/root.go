@@ -4,10 +4,12 @@ Copyright © 2026 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"os"
+
 	"nathanbeddoewebdev/vpsm/cmd/commands/auth"
+	cfgcmd "nathanbeddoewebdev/vpsm/cmd/commands/config"
 	"nathanbeddoewebdev/vpsm/cmd/commands/server"
 	"nathanbeddoewebdev/vpsm/internal/providers"
-	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -30,6 +32,7 @@ to quickly create a Cobra application.`,
 	}
 
 	cmd.AddCommand(auth.NewCommand())
+	cmd.AddCommand(cfgcmd.NewCommand())
 	cmd.AddCommand(server.NewCommand())
 
 	return cmd

@@ -11,15 +11,16 @@ type Location struct {
 
 // ServerTypeSpec describes an available server configuration from a provider.
 type ServerTypeSpec struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`        // e.g. "cpx11"
-	Description  string  `json:"description"` // e.g. "CPX 11"
-	Cores        int     `json:"cores"`
-	Memory       float64 `json:"memory"`       // in GB
-	Disk         int     `json:"disk"`         // in GB
-	Architecture string  `json:"architecture"` // e.g. "x86", "arm"
-	PriceMonthly string  `json:"price_monthly"`
-	PriceHourly  string  `json:"price_hourly"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`        // e.g. "cpx11"
+	Description  string   `json:"description"` // e.g. "CPX 11"
+	Cores        int      `json:"cores"`
+	Memory       float64  `json:"memory"`       // in GB
+	Disk         int      `json:"disk"`         // in GB
+	Architecture string   `json:"architecture"` // e.g. "x86", "arm"
+	PriceMonthly string   `json:"price_monthly"`
+	PriceHourly  string   `json:"price_hourly"`
+	Locations    []string `json:"locations"` // location names where available
 }
 
 // ImageSpec describes an available OS image from a provider.

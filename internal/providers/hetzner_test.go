@@ -60,7 +60,21 @@ func testServerTypeJSON(id int, name, arch string) map[string]interface{} {
 		"storage_type": "local",
 		"cpu_type":     "shared",
 		"prices":       []interface{}{},
+		"locations":    []interface{}{},
 	}
+}
+
+// testServerTypeLocationJSON builds a Hetzner API server_type location entry,
+// optionally with deprecation info.
+func testServerTypeLocationJSON(id int, name string, deprecation map[string]interface{}) map[string]interface{} {
+	loc := map[string]interface{}{
+		"id":   id,
+		"name": name,
+	}
+	if deprecation != nil {
+		loc["deprecation"] = deprecation
+	}
+	return loc
 }
 
 // testImageJSON builds a Hetzner API image object.
