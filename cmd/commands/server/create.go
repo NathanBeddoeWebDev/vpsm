@@ -12,6 +12,7 @@ import (
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 	"nathanbeddoewebdev/vpsm/internal/tui"
+	"nathanbeddoewebdev/vpsm/internal/util"
 
 	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
@@ -91,6 +92,13 @@ func runCreate(cmd *cobra.Command, args []string) {
 	}
 	if serverType == "" {
 		missing = append(missing, "--type")
+	}
+
+	if name != "" {
+		if err := util.ValidateServerName(name); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+			return
+		}
 	}
 
 	opts := domain.CreateServerOpts{

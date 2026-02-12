@@ -15,7 +15,7 @@ type optionPair struct {
 	Value string
 }
 
-func TestBuildLocationOptions_AddsAutoAndCustom(t *testing.T) {
+func TestBuildLocationOptions_AddsCustom(t *testing.T) {
 	locations := []domain.Location{
 		{
 			ID:      "1",
@@ -28,7 +28,6 @@ func TestBuildLocationOptions_AddsAutoAndCustom(t *testing.T) {
 	options, labels := buildLocationOptions(locations, "custom-loc")
 
 	expected := []optionPair{
-		{Key: "Auto (provider default)", Value: ""},
 		{Key: "fsn1 - Falkenstein, DE", Value: "fsn1"},
 		{Key: "Custom: custom-loc", Value: "custom-loc"},
 	}
@@ -36,8 +35,8 @@ func TestBuildLocationOptions_AddsAutoAndCustom(t *testing.T) {
 	if diff := cmp.Diff(expected, optionsToPairs(options)); diff != "" {
 		t.Errorf("unexpected location options (-want +got):\n%s", diff)
 	}
-	if labels[""] != "Auto (provider default)" {
-		t.Errorf("expected auto label in map, got %q", labels[""])
+	if _, ok := labels[""]; ok {
+		t.Errorf("expected no auto label in map, but found one")
 	}
 }
 

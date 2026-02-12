@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"nathanbeddoewebdev/vpsm/internal/domain"
+	"nathanbeddoewebdev/vpsm/internal/util"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/huh/spinner"
@@ -73,10 +74,11 @@ func CreateServerForm(provider domain.CatalogProvider, prefill domain.CreateServ
 		Title("Server name").
 		Value(&opts.Name).
 		Validate(func(value string) error {
-			if strings.TrimSpace(value) == "" {
+			trimmed := strings.TrimSpace(value)
+			if trimmed == "" {
 				return errors.New("name is required")
 			}
-			return nil
+			return util.ValidateServerName(trimmed)
 		})
 
 	locationField := huh.NewSelect[string]().
@@ -288,12 +290,8 @@ func hasServerType(serverTypes []domain.ServerTypeSpec, name string) bool {
 // --- Option builders ---
 
 func buildLocationOptions(locations []domain.Location, selected string) ([]huh.Option[string], map[string]string) {
-	options := make([]huh.Option[string], 0, len(locations)+1)
-	labels := make(map[string]string, len(locations)+1)
-
-	autoLabel := "Auto (provider default)"
-	options = append(options, huh.NewOption(autoLabel, ""))
-	labels[""] = autoLabel
+	options := make([]huh.Option[string], 0, len(locations))
+	labels := make(map[string]string, len(locations))
 
 	for _, loc := range locations {
 		value := valueOrID(loc.Name, loc.ID)
