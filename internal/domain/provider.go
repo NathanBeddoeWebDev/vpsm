@@ -23,3 +23,10 @@ type CatalogProvider interface {
 	ListImages(ctx context.Context) ([]ImageSpec, error)
 	ListSSHKeys(ctx context.Context) ([]SSHKeySpec, error)
 }
+
+// SSHKeyManager extends Provider with SSH key management operations.
+type SSHKeyManager interface {
+	Provider
+
+	CreateSSHKey(ctx context.Context, name, publicKey string) (*SSHKeySpec, error)
+}

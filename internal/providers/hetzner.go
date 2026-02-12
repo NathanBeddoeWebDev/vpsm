@@ -17,6 +17,7 @@ import (
 // Compile-time check that HetznerProvider satisfies CatalogProvider
 // (which embeds Provider).
 var _ domain.CatalogProvider = (*HetznerProvider)(nil)
+var _ domain.SSHKeyManager = (*HetznerProvider)(nil)
 
 // HetznerProvider implements domain.Provider using the Hetzner Cloud API.
 type HetznerProvider struct {

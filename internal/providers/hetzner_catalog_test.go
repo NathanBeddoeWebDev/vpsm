@@ -471,6 +471,93 @@ func TestListSSHKeys_Non200(t *testing.T) {
 	}
 }
 
+// --- CreateSSHKey tests ---
+
+func TestCreateSSHKey_HappyPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/ssh_keys" {
+			t.Errorf("expected path /ssh_keys, got %s", r.URL.Path)
+		}
+
+		var req map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+
+		if req["name"] != "my-laptop" {
+			t.Errorf("expected name 'my-laptop', got %v", req["name"])
+		}
+		if req["public_key"] != "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5..." {
+			t.Errorf("unexpected public_key: %v", req["public_key"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ssh_key": testSSHKeyJSON(42, "my-laptop", "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5..."),
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
+	key, err := provider.CreateSSHKey(context.Background(), "my-laptop", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5...")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	want := &domain.SSHKeySpec{
+		ID:          "42",
+		Name:        "my-laptop",
+		Fingerprint: "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99",
+	}
+
+	if diff := cmp.Diff(want, key); diff != "" {
+		t.Errorf("SSH key mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestCreateSSHKey_DuplicateName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]interface{}{
+				"code":    "conflict",
+				"message": "SSH key with this name already exists",
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
+	_, err := provider.CreateSSHKey(context.Background(), "duplicate-key", "ssh-rsa AAAA...")
+	if err == nil {
+		t.Fatal("expected error for duplicate key, got nil")
+	}
+}
+
+func TestCreateSSHKey_Unauthorized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]interface{}{
+				"code":    "unauthorized",
+				"message": "unable to authenticate",
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	provider := newTestHetznerProvider(t, srv.URL, "bad-token")
+	_, err := provider.CreateSSHKey(context.Background(), "my-key", "ssh-rsa AAAA...")
+	if err == nil {
+		t.Fatal("expected error for unauthorized, got nil")
+	}
+}
+
 // --- Verify correct endpoints ---
 
 func TestCatalogMethods_RequestPaths(t *testing.T) {
