@@ -51,6 +51,13 @@ func Get(name string, store auth.Store) (domain.Provider, error) {
 	return provider, nil
 }
 
+// Reset clears the provider registry. Intended for use in tests only.
+func Reset() {
+	mu.Lock()
+	defer mu.Unlock()
+	registry = map[string]Factory{}
+}
+
 func List() []string {
 	mu.RLock()
 	defer mu.RUnlock()

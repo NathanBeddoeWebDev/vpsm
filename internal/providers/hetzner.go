@@ -20,35 +20,39 @@ type hetznerListServersResponse struct {
 	Servers []hetznerServer `json:"servers"`
 }
 
+type hetznerIPAddress struct {
+	IP string `json:"ip"`
+}
+
+type hetznerServerType struct {
+	Name         string `json:"name"`
+	Architecture string `json:"architecture"`
+}
+
+type hetznerImage struct {
+	Name string `json:"name"`
+}
+
+type hetznerLocation struct {
+	Name string `json:"name"`
+}
+
+type hetznerPublicNet struct {
+	IPv4 *hetznerIPAddress `json:"ipv4"`
+	IPv6 *hetznerIPAddress `json:"ipv6"`
+}
+
 type hetznerServer struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Status    string    `json:"status"`
-	Created   time.Time `json:"created"`
-	PublicNet struct {
-		IPv4 *struct {
-			IP string `json:"ip"`
-		} `json:"ipv4"`
-		IPv6 *struct {
-			IP string `json:"ip"`
-		} `json:"ipv6"`
-	} `json:"public_net"`
-	PrivateNet []struct {
-		IP string `json:"ip"`
-	} `json:"private_net"`
-	ServerType struct {
-		Name         string `json:"name"`
-		Architecture string `json:"architecture"`
-	} `json:"server_type"`
-	Image *struct {
-		Name string `json:"name"`
-	} `json:"image"`
-	Location struct {
-		Name string `json:"name"`
-	} `json:"location"`
-	Datacenter struct {
-		Name string `json:"name"`
-	} `json:"datacenter"`
+	ID         int64              `json:"id"`
+	Name       string             `json:"name"`
+	Status     string             `json:"status"`
+	Created    time.Time          `json:"created"`
+	PublicNet  hetznerPublicNet   `json:"public_net"`
+	PrivateNet []hetznerIPAddress `json:"private_net"`
+	ServerType hetznerServerType  `json:"server_type"`
+	Image      *hetznerImage      `json:"image"`
+	Location   hetznerLocation    `json:"location"`
+	Datacenter hetznerLocation    `json:"datacenter"`
 }
 
 type HetznerProvider struct {

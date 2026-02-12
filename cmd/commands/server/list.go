@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"os"
 	"text/tabwriter"
 
 	"nathanbeddoewebdev/vpsm/internal/providers"
@@ -21,23 +20,23 @@ func ListCommand() *cobra.Command {
 
 			provider, err := providers.Get(providerName, auth.DefaultStore())
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 				return
 			}
 
 			servers, err := provider.ListServers()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error listing servers: %v\n", err)
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error listing servers: %v\n", err)
 				return
 			}
 
 			if len(servers) == 0 {
-				fmt.Println("No servers found.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No servers found.")
 				return
 			}
 
 			// Create a tabwriter for pretty output
-			w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
 			fmt.Fprintln(w, "ID\tNAME\tSTATUS\tREGION\tTYPE\tPUBLIC IPv4\tIMAGE")
 			fmt.Fprintln(w, "--\t----\t------\t------\t----\t-----------\t-----")
 
