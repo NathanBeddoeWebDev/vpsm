@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
-
 	"nathanbeddoewebdev/vpsm/internal/domain"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 // --- ListLocations tests ---
@@ -24,7 +24,7 @@ func TestListLocations_HappyPath(t *testing.T) {
 	}
 
 	srv := newTestAPI(t, response)
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	locations, err := provider.ListLocations(context.Background())
 	if err != nil {
@@ -50,7 +50,7 @@ func TestListLocations_EmptyList(t *testing.T) {
 	srv := newTestAPI(t, map[string]interface{}{
 		"locations": []interface{}{},
 	})
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	locations, err := provider.ListLocations(context.Background())
 	if err != nil {
@@ -58,6 +58,35 @@ func TestListLocations_EmptyList(t *testing.T) {
 	}
 	if len(locations) != 0 {
 		t.Errorf("expected 0 locations, got %d", len(locations))
+	}
+}
+
+func TestListLocations_UsesCache(t *testing.T) {
+	callCount := 0
+	response := map[string]interface{}{
+		"locations": []interface{}{
+			testLocationJSON(1, "fsn1", "DE", "Falkenstein"),
+		},
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	t.Cleanup(srv.Close)
+
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
+	ctx := context.Background()
+
+	if _, err := provider.ListLocations(ctx); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if _, err := provider.ListLocations(ctx); err != nil {
+		t.Fatalf("expected no error on cached call, got %v", err)
+	}
+	if callCount != 1 {
+		t.Fatalf("expected 1 API call, got %d", callCount)
 	}
 }
 
@@ -74,7 +103,7 @@ func TestListLocations_Non200(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	provider := newTestHetznerProvider(srv.URL, "bad-token")
+	provider := newTestHetznerProvider(t, srv.URL, "bad-token")
 	_, err := provider.ListLocations(context.Background())
 	if err == nil {
 		t.Fatal("expected error for 401 response, got nil")
@@ -125,7 +154,7 @@ func TestListServerTypes_HappyPath(t *testing.T) {
 	}
 
 	srv := newTestAPI(t, response)
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	serverTypes, err := provider.ListServerTypes(context.Background())
 	if err != nil {
@@ -183,7 +212,7 @@ func TestListServerTypes_ExcludesDeprecatedLocations(t *testing.T) {
 	}
 
 	srv := newTestAPI(t, response)
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	serverTypes, err := provider.ListServerTypes(context.Background())
 	if err != nil {
@@ -217,7 +246,7 @@ func TestListServerTypes_FallsBackToPricesWhenNoLocations(t *testing.T) {
 	}
 
 	srv := newTestAPI(t, response)
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	serverTypes, err := provider.ListServerTypes(context.Background())
 	if err != nil {
@@ -243,7 +272,7 @@ func TestListServerTypes_NoPrices(t *testing.T) {
 	}
 
 	srv := newTestAPI(t, response)
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	serverTypes, err := provider.ListServerTypes(context.Background())
 	if err != nil {
@@ -266,7 +295,7 @@ func TestListServerTypes_EmptyList(t *testing.T) {
 	srv := newTestAPI(t, map[string]interface{}{
 		"server_types": []interface{}{},
 	})
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	serverTypes, err := provider.ListServerTypes(context.Background())
 	if err != nil {
@@ -290,7 +319,7 @@ func TestListServerTypes_Non200(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 	_, err := provider.ListServerTypes(context.Background())
 	if err == nil {
 		t.Fatal("expected error for 500 response, got nil")
@@ -308,7 +337,7 @@ func TestListImages_HappyPath(t *testing.T) {
 	}
 
 	srv := newTestAPI(t, response)
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	images, err := provider.ListImages(context.Background())
 	if err != nil {
@@ -333,7 +362,7 @@ func TestListImages_EmptyList(t *testing.T) {
 	srv := newTestAPI(t, map[string]interface{}{
 		"images": []interface{}{},
 	})
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	images, err := provider.ListImages(context.Background())
 	if err != nil {
@@ -357,7 +386,7 @@ func TestListImages_Non200(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 	_, err := provider.ListImages(context.Background())
 	if err == nil {
 		t.Fatal("expected error for 403 response, got nil")
@@ -386,7 +415,7 @@ func TestListSSHKeys_HappyPath(t *testing.T) {
 	}
 
 	srv := newTestAPI(t, response)
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	keys, err := provider.ListSSHKeys(context.Background())
 	if err != nil {
@@ -411,7 +440,7 @@ func TestListSSHKeys_EmptyList(t *testing.T) {
 	srv := newTestAPI(t, map[string]interface{}{
 		"ssh_keys": []interface{}{},
 	})
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	keys, err := provider.ListSSHKeys(context.Background())
 	if err != nil {
@@ -435,7 +464,7 @@ func TestListSSHKeys_Non200(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	provider := newTestHetznerProvider(srv.URL, "bad-token")
+	provider := newTestHetznerProvider(t, srv.URL, "bad-token")
 	_, err := provider.ListSSHKeys(context.Background())
 	if err == nil {
 		t.Fatal("expected error for 401 response, got nil")
@@ -493,7 +522,7 @@ func TestCatalogMethods_RequestPaths(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 
-			provider := newTestHetznerProvider(srv.URL, "catalog-token")
+			provider := newTestHetznerProvider(t, srv.URL, "catalog-token")
 			if err := tc.call(provider); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

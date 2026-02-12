@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"nathanbeddoewebdev/vpsm/internal/domain"
+	"nathanbeddoewebdev/vpsm/internal/retry"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 )
@@ -29,7 +30,14 @@ func (h *HetznerProvider) CreateServer(ctx context.Context, opts domain.CreateSe
 	// The SDK requires SSH key IDs in the request body, so we resolve
 	// each name-or-ID through the API before creating the server.
 	for _, key := range opts.SSHKeys {
-		sshKey, _, err := h.client.SSHKey.Get(ctx, key)
+		var sshKey *hcloud.SSHKey
+		err := retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+			reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+			defer cancel()
+			var apiErr error
+			sshKey, _, apiErr = h.client.SSHKey.Get(reqCtx, key)
+			return apiErr
+		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve SSH key %q: %w", key, err)
 		}
@@ -39,7 +47,9 @@ func (h *HetznerProvider) CreateServer(ctx context.Context, opts domain.CreateSe
 		hcloudOpts.SSHKeys = append(hcloudOpts.SSHKeys, sshKey)
 	}
 
-	result, _, err := h.client.Server.Create(ctx, hcloudOpts)
+	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	result, _, err := h.client.Server.Create(reqCtx, hcloudOpts)
 	if err != nil {
 		if hcloud.IsError(err, hcloud.ErrorCodeUniquenessError) {
 			return nil, fmt.Errorf("failed to create server: %w", domain.ErrConflict)

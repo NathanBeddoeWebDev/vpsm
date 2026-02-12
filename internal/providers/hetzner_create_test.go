@@ -97,7 +97,7 @@ func TestCreateServer_HappyPath(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	server, err := provider.CreateServer(ctx, domain.CreateServerOpts{
 		Name:       "my-server",
@@ -185,7 +185,7 @@ func TestCreateServer_WithSSHKeys(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	server, err := provider.CreateServer(ctx, domain.CreateServerOpts{
 		Name:       "ssh-server",
@@ -223,7 +223,7 @@ func TestCreateServer_RootPassword(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	server, err := provider.CreateServer(ctx, domain.CreateServerOpts{
 		Name:       "nokey-server",
@@ -254,7 +254,7 @@ func TestCreateServer_SSHKeyNotFound(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	_, err := provider.CreateServer(ctx, domain.CreateServerOpts{
 		Name:       "fail-server",
@@ -285,7 +285,7 @@ func TestCreateServer_APIError(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	_, err := provider.CreateServer(ctx, domain.CreateServerOpts{
 		Name:       "duplicate-server",
@@ -330,7 +330,7 @@ func TestCreateServer_WithLabelsAndUserData(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	server, err := provider.CreateServer(ctx, domain.CreateServerOpts{
 		Name:       "labeled-server",

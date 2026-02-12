@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"nathanbeddoewebdev/vpsm/internal/cache"
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 
@@ -20,11 +21,14 @@ import (
 
 // newTestHetznerProvider creates a HetznerProvider whose SDK client
 // is pointed at the given httptest server URL.
-func newTestHetznerProvider(serverURL string, token string) *HetznerProvider {
-	return NewHetznerProvider(
+func newTestHetznerProvider(t *testing.T, serverURL string, token string) *HetznerProvider {
+	t.Helper()
+	provider := NewHetznerProvider(
 		hcloud.WithEndpoint(serverURL),
 		hcloud.WithToken(token),
 	)
+	provider.cache = cache.New(t.TempDir())
+	return provider
 }
 
 // newTestAPI spins up an httptest.Server that returns the given response as JSON.
@@ -160,7 +164,7 @@ func TestListServers_HappyPath(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 	servers, err := provider.ListServers(ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -218,13 +222,53 @@ func TestListServers_EmptyList(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 	servers, err := provider.ListServers(ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	if len(servers) != 0 {
 		t.Errorf("expected 0 servers, got %d", len(servers))
+	}
+}
+
+func TestListServers_RetriesOnTransientError(t *testing.T) {
+	createdStr := "2024-06-15T12:00:00+00:00"
+	loc := testLocationJSON(1, "fsn1", "DE", "Falkenstein")
+	st := testServerTypeJSON(1, "cpx11", "x86")
+	server := testServerJSON(42, "retry-server", "running", createdStr, loc, st)
+
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		if callCount == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": map[string]interface{}{
+					"code":    "service_error",
+					"message": "temporary error",
+				},
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"servers": []interface{}{server},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx := context.Background()
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
+	servers, err := provider.ListServers(ctx)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(servers) != 1 {
+		t.Fatalf("expected 1 server, got %d", len(servers))
+	}
+	if callCount != 2 {
+		t.Fatalf("expected 2 API calls, got %d", callCount)
 	}
 }
 
@@ -240,7 +284,7 @@ func TestListServers_NilOptionalFields(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 	servers, err := provider.ListServers(ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -278,7 +322,7 @@ func TestListServers_Non200StatusCode(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "bad-token")
+	provider := newTestHetznerProvider(t, srv.URL, "bad-token")
 	_, err := provider.ListServers(ctx)
 	if err == nil {
 		t.Fatal("expected error for 401 response, got nil")
@@ -293,7 +337,7 @@ func TestListServers_MalformedJSON(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 	_, err := provider.ListServers(ctx)
 	if err == nil {
 		t.Fatal("expected error for malformed JSON, got nil")
@@ -406,7 +450,7 @@ func TestDeleteServer_HappyPath(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 	err := provider.DeleteServer(ctx, "42")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -415,7 +459,7 @@ func TestDeleteServer_HappyPath(t *testing.T) {
 
 func TestDeleteServer_InvalidID(t *testing.T) {
 	ctx := context.Background()
-	provider := newTestHetznerProvider("http://unused", "test-token")
+	provider := newTestHetznerProvider(t, "http://unused", "test-token")
 	err := provider.DeleteServer(ctx, "not-a-number")
 	if err == nil {
 		t.Fatal("expected error for non-numeric ID, got nil")
@@ -439,7 +483,7 @@ func TestDeleteServer_NotFound(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 	err := provider.DeleteServer(ctx, "999")
 	if err == nil {
 		t.Fatal("expected error for 404 response, got nil")
@@ -460,7 +504,7 @@ func TestDeleteServer_APIError(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	ctx := context.Background()
-	provider := newTestHetznerProvider(srv.URL, "test-token")
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 	err := provider.DeleteServer(ctx, "42")
 	if err == nil {
 		t.Fatal("expected error for 500 response, got nil")

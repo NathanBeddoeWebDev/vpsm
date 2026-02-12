@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"nathanbeddoewebdev/vpsm/internal/domain"
+	"nathanbeddoewebdev/vpsm/internal/retry"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 )
@@ -16,7 +17,22 @@ import (
 
 // ListLocations retrieves all available locations from the Hetzner Cloud API.
 func (h *HetznerProvider) ListLocations(ctx context.Context) ([]domain.Location, error) {
-	hzLocations, err := h.client.Location.All(ctx)
+	if h.cache != nil {
+		var cached []domain.Location
+		hit, err := h.cache.Get(catalogCacheKey("locations"), defaultCatalogCacheTTL, &cached)
+		if err == nil && hit {
+			return cached, nil
+		}
+	}
+
+	var hzLocations []*hcloud.Location
+	err := retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+		var apiErr error
+		hzLocations, apiErr = h.client.Location.All(reqCtx)
+		return apiErr
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list locations: %w", err)
 	}
@@ -26,12 +42,31 @@ func (h *HetznerProvider) ListLocations(ctx context.Context) ([]domain.Location,
 		locations = append(locations, toDomainLocation(loc))
 	}
 
+	if h.cache != nil {
+		_ = h.cache.Set(catalogCacheKey("locations"), locations)
+	}
+
 	return locations, nil
 }
 
 // ListServerTypes retrieves all available server types from the Hetzner Cloud API.
 func (h *HetznerProvider) ListServerTypes(ctx context.Context) ([]domain.ServerTypeSpec, error) {
-	hzServerTypes, err := h.client.ServerType.All(ctx)
+	if h.cache != nil {
+		var cached []domain.ServerTypeSpec
+		hit, err := h.cache.Get(catalogCacheKey("server_types"), defaultCatalogCacheTTL, &cached)
+		if err == nil && hit {
+			return cached, nil
+		}
+	}
+
+	var hzServerTypes []*hcloud.ServerType
+	err := retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+		var apiErr error
+		hzServerTypes, apiErr = h.client.ServerType.All(reqCtx)
+		return apiErr
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list server types: %w", err)
 	}
@@ -41,13 +76,32 @@ func (h *HetznerProvider) ListServerTypes(ctx context.Context) ([]domain.ServerT
 		serverTypes = append(serverTypes, toDomainServerType(st))
 	}
 
+	if h.cache != nil {
+		_ = h.cache.Set(catalogCacheKey("server_types"), serverTypes)
+	}
+
 	return serverTypes, nil
 }
 
 // ListImages retrieves all available images from the Hetzner Cloud API.
 func (h *HetznerProvider) ListImages(ctx context.Context) ([]domain.ImageSpec, error) {
-	hzImages, err := h.client.Image.AllWithOpts(ctx, hcloud.ImageListOpts{
-		Status: []hcloud.ImageStatus{hcloud.ImageStatusAvailable},
+	if h.cache != nil {
+		var cached []domain.ImageSpec
+		hit, err := h.cache.Get(catalogCacheKey("images"), defaultCatalogCacheTTL, &cached)
+		if err == nil && hit {
+			return cached, nil
+		}
+	}
+
+	var hzImages []*hcloud.Image
+	err := retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+		var apiErr error
+		hzImages, apiErr = h.client.Image.AllWithOpts(reqCtx, hcloud.ImageListOpts{
+			Status: []hcloud.ImageStatus{hcloud.ImageStatusAvailable},
+		})
+		return apiErr
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list images: %w", err)
@@ -58,12 +112,23 @@ func (h *HetznerProvider) ListImages(ctx context.Context) ([]domain.ImageSpec, e
 		images = append(images, toDomainImage(img))
 	}
 
+	if h.cache != nil {
+		_ = h.cache.Set(catalogCacheKey("images"), images)
+	}
+
 	return images, nil
 }
 
 // ListSSHKeys retrieves all SSH keys from the Hetzner Cloud API.
 func (h *HetznerProvider) ListSSHKeys(ctx context.Context) ([]domain.SSHKeySpec, error) {
-	hzKeys, err := h.client.SSHKey.All(ctx)
+	var hzKeys []*hcloud.SSHKey
+	err := retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+		var apiErr error
+		hzKeys, apiErr = h.client.SSHKey.All(reqCtx)
+		return apiErr
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list SSH keys: %w", err)
 	}
@@ -184,4 +249,8 @@ func toDomainSSHKey(k *hcloud.SSHKey) domain.SSHKeySpec {
 		Name:        k.Name,
 		Fingerprint: k.Fingerprint,
 	}
+}
+
+func catalogCacheKey(resource string) string {
+	return "catalog_hetzner_" + resource
 }

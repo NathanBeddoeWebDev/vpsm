@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
+	"nathanbeddoewebdev/vpsm/internal/cache"
 	"nathanbeddoewebdev/vpsm/internal/domain"
+	"nathanbeddoewebdev/vpsm/internal/retry"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -18,7 +21,13 @@ var _ domain.CatalogProvider = (*HetznerProvider)(nil)
 // HetznerProvider implements domain.Provider using the Hetzner Cloud API.
 type HetznerProvider struct {
 	client *hcloud.Client
+	cache  *cache.Cache
 }
+
+const (
+	requestTimeout         = 30 * time.Second
+	defaultCatalogCacheTTL = time.Hour
+)
 
 // NewHetznerProvider creates a HetznerProvider with the given hcloud client options.
 // Default options (application name) are applied first; callers can override them.
@@ -29,6 +38,7 @@ func NewHetznerProvider(opts ...hcloud.ClientOption) *HetznerProvider {
 	allOpts := append(defaults, opts...)
 	return &HetznerProvider{
 		client: hcloud.NewClient(allOpts...),
+		cache:  cache.NewDefault(),
 	}
 }
 
@@ -56,7 +66,12 @@ func (h *HetznerProvider) DeleteServer(ctx context.Context, id string) error {
 		return fmt.Errorf("invalid server ID %q: %w", id, err)
 	}
 
-	_, _, err = h.client.Server.DeleteWithResult(ctx, &hcloud.Server{ID: numericID})
+	err = retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+		_, _, err := h.client.Server.DeleteWithResult(reqCtx, &hcloud.Server{ID: numericID})
+		return err
+	})
 	if err != nil {
 		if hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
 			return fmt.Errorf("failed to delete server: %w", domain.ErrNotFound)
@@ -80,7 +95,14 @@ func (h *HetznerProvider) GetServer(ctx context.Context, id string) (*domain.Ser
 		return nil, fmt.Errorf("invalid server ID %q: %w", id, err)
 	}
 
-	hzServer, _, err := h.client.Server.GetByID(ctx, numericID)
+	var hzServer *hcloud.Server
+	err = retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+		var apiErr error
+		hzServer, _, apiErr = h.client.Server.GetByID(reqCtx, numericID)
+		return apiErr
+	})
 	if err != nil {
 		if hcloud.IsError(err, hcloud.ErrorCodeUnauthorized) {
 			return nil, fmt.Errorf("failed to get server: %w", domain.ErrUnauthorized)
@@ -101,7 +123,14 @@ func (h *HetznerProvider) GetServer(ctx context.Context, id string) (*domain.Ser
 
 // ListServers retrieves all servers from the Hetzner Cloud API.
 func (h *HetznerProvider) ListServers(ctx context.Context) ([]domain.Server, error) {
-	hzServers, err := h.client.Server.All(ctx)
+	var hzServers []*hcloud.Server
+	err := retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+		var apiErr error
+		hzServers, apiErr = h.client.Server.All(reqCtx)
+		return apiErr
+	})
 	if err != nil {
 		if hcloud.IsError(err, hcloud.ErrorCodeUnauthorized) {
 			return nil, fmt.Errorf("failed to list servers: %w", domain.ErrUnauthorized)
@@ -160,4 +189,24 @@ func toDomainServer(s *hcloud.Server) domain.Server {
 	server.Metadata["hetzner_id"] = s.ID
 
 	return server
+}
+
+func isHetznerRetryable(err error) bool {
+	if retry.IsRetryable(err) {
+		return true
+	}
+
+	return hcloud.IsError(
+		err,
+		hcloud.ErrorCodeRateLimitExceeded,
+		hcloud.ErrorCodeServiceError,
+		hcloud.ErrorCodeServerError,
+		hcloud.ErrorCodeTimeout,
+		hcloud.ErrorCodeUnknownError,
+		hcloud.ErrorCodeConflict,
+		hcloud.ErrorCodeResourceUnavailable,
+		hcloud.ErrorCodeMaintenance,
+		hcloud.ErrorCodeRobotUnavailable,
+		hcloud.ErrorCodeLocked,
+	)
 }
