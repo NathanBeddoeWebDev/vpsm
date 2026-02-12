@@ -44,8 +44,21 @@ func (h *HetznerProvider) GetDisplayName() string {
 	return "Hetzner"
 }
 
+// DeleteServer removes a server by its ID. The ID must be a numeric string
+// matching the Hetzner server ID.
 func (h *HetznerProvider) DeleteServer(id string) error {
-	return fmt.Errorf("not implemented")
+	numericID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid server ID %q: %w", id, err)
+	}
+
+	ctx := context.Background()
+	_, _, err = h.client.Server.DeleteWithResult(ctx, &hcloud.Server{ID: numericID})
+	if err != nil {
+		return fmt.Errorf("failed to delete server: %w", err)
+	}
+
+	return nil
 }
 
 // ListServers retrieves all servers from the Hetzner Cloud API.

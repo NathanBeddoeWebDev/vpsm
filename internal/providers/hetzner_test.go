@@ -4,14 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
-	"github.com/hetznercloud/hcloud-go/v2/hcloud"
-
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 )
 
 // --- Test helpers ---
@@ -365,5 +366,95 @@ func TestListServers_FactoryMissingToken(t *testing.T) {
 	_, err := Get("test-hetzner", store)
 	if err == nil {
 		t.Fatal("expected error for missing token, got nil")
+	}
+}
+
+// --- DeleteServer tests ---
+
+func TestDeleteServer_HappyPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Errorf("expected DELETE method, got %s", r.Method)
+		}
+		if r.URL.Path != "/servers/42" {
+			t.Errorf("expected path /servers/42, got %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("expected Authorization 'Bearer test-token', got %q", r.Header.Get("Authorization"))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"action": map[string]interface{}{
+				"id":       1,
+				"status":   "running",
+				"command":  "delete_server",
+				"progress": 0,
+				"resources": []interface{}{
+					map[string]interface{}{"id": 42, "type": "server"},
+				},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	provider := newTestHetznerProvider(srv.URL, "test-token")
+	err := provider.DeleteServer("42")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestDeleteServer_InvalidID(t *testing.T) {
+	provider := newTestHetznerProvider("http://unused", "test-token")
+	err := provider.DeleteServer("not-a-number")
+	if err == nil {
+		t.Fatal("expected error for non-numeric ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid server ID") {
+		t.Errorf("expected 'invalid server ID' in error, got: %v", err)
+	}
+}
+
+func TestDeleteServer_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]interface{}{
+				"code":    "not_found",
+				"message": "server with ID '999' not found",
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	provider := newTestHetznerProvider(srv.URL, "test-token")
+	err := provider.DeleteServer("999")
+	if err == nil {
+		t.Fatal("expected error for 404 response, got nil")
+	}
+}
+
+func TestDeleteServer_APIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]interface{}{
+				"code":    "server_error",
+				"message": "internal server error",
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	provider := newTestHetznerProvider(srv.URL, "test-token")
+	err := provider.DeleteServer("42")
+	if err == nil {
+		t.Fatal("expected error for 500 response, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to delete server") {
+		t.Errorf("expected 'failed to delete server' in error, got: %v", err)
 	}
 }
