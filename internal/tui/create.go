@@ -210,11 +210,11 @@ func runForm(accessible bool, groups ...*huh.Group) error {
 // fetchCatalog fetches locations, server types, images, and SSH keys concurrently.
 func fetchCatalog(ctx context.Context, provider domain.CatalogProvider) (catalogData, error) {
 	var data catalogData
-	g, _ := errgroup.WithContext(ctx)
+	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
 		var err error
-		data.locations, err = provider.ListLocations()
+		data.locations, err = provider.ListLocations(gctx)
 		if err != nil {
 			return fmt.Errorf("failed to list locations: %w", err)
 		}
@@ -222,7 +222,7 @@ func fetchCatalog(ctx context.Context, provider domain.CatalogProvider) (catalog
 	})
 	g.Go(func() error {
 		var err error
-		data.serverTypes, err = provider.ListServerTypes()
+		data.serverTypes, err = provider.ListServerTypes(gctx)
 		if err != nil {
 			return fmt.Errorf("failed to list server types: %w", err)
 		}
@@ -230,7 +230,7 @@ func fetchCatalog(ctx context.Context, provider domain.CatalogProvider) (catalog
 	})
 	g.Go(func() error {
 		var err error
-		data.images, err = provider.ListImages()
+		data.images, err = provider.ListImages(gctx)
 		if err != nil {
 			return fmt.Errorf("failed to list images: %w", err)
 		}
@@ -238,7 +238,7 @@ func fetchCatalog(ctx context.Context, provider domain.CatalogProvider) (catalog
 	})
 	g.Go(func() error {
 		var err error
-		data.sshKeys, err = provider.ListSSHKeys()
+		data.sshKeys, err = provider.ListSSHKeys(gctx)
 		if err != nil {
 			return fmt.Errorf("failed to list SSH keys: %w", err)
 		}

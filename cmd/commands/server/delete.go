@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -70,6 +71,8 @@ func runDelete(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Deleting server %s...\n", serverID)
 	}
 
+	ctx := context.Background()
+
 	if useInteractive {
 		accessible := os.Getenv("ACCESSIBLE") != ""
 		var deleteErr error
@@ -78,7 +81,7 @@ func runDelete(cmd *cobra.Command, args []string) {
 			Accessible(accessible).
 			Output(cmd.ErrOrStderr()).
 			Action(func() {
-				deleteErr = provider.DeleteServer(serverID)
+				deleteErr = provider.DeleteServer(ctx, serverID)
 			}).
 			Run()
 		if spinErr != nil {
@@ -87,7 +90,7 @@ func runDelete(cmd *cobra.Command, args []string) {
 		}
 		err = deleteErr
 	} else {
-		err = provider.DeleteServer(serverID)
+		err = provider.DeleteServer(ctx, serverID)
 	}
 
 	if err != nil {

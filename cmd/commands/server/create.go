@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -147,6 +148,8 @@ func runCreate(cmd *cobra.Command, args []string) {
 
 	logCreateOpts(cmd, opts)
 
+	ctx := context.Background()
+
 	var server *domain.Server
 	if useInteractive {
 		accessible := os.Getenv("ACCESSIBLE") != ""
@@ -156,7 +159,7 @@ func runCreate(cmd *cobra.Command, args []string) {
 			Accessible(accessible).
 			Output(cmd.ErrOrStderr()).
 			Action(func() {
-				server, createErr = provider.CreateServer(opts)
+				server, createErr = provider.CreateServer(ctx, opts)
 			}).
 			Run()
 		if spinErr != nil {
@@ -165,7 +168,7 @@ func runCreate(cmd *cobra.Command, args []string) {
 		}
 		err = createErr
 	} else {
-		server, err = provider.CreateServer(opts)
+		server, err = provider.CreateServer(ctx, opts)
 	}
 	if err != nil {
 		logCreateOptsFull(cmd, opts)

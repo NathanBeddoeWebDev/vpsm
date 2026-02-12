@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"text/tabwriter"
 
@@ -24,7 +25,8 @@ func ListCommand() *cobra.Command {
 				return
 			}
 
-			servers, err := provider.ListServers()
+			ctx := context.Background()
+			servers, err := provider.ListServers(ctx)
 			if err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Error listing servers: %v\n", err)
 				return

@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -95,9 +96,10 @@ func TestCreateServer_HappyPath(t *testing.T) {
 		},
 	})
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	server, err := provider.CreateServer(domain.CreateServerOpts{
+	server, err := provider.CreateServer(ctx, domain.CreateServerOpts{
 		Name:       "my-server",
 		Image:      "ubuntu-24.04",
 		ServerType: "cpx11",
@@ -182,9 +184,10 @@ func TestCreateServer_WithSSHKeys(t *testing.T) {
 		},
 	})
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	server, err := provider.CreateServer(domain.CreateServerOpts{
+	server, err := provider.CreateServer(ctx, domain.CreateServerOpts{
 		Name:       "ssh-server",
 		Image:      "ubuntu-24.04",
 		ServerType: "cpx11",
@@ -219,9 +222,10 @@ func TestCreateServer_RootPassword(t *testing.T) {
 		},
 	})
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	server, err := provider.CreateServer(domain.CreateServerOpts{
+	server, err := provider.CreateServer(ctx, domain.CreateServerOpts{
 		Name:       "nokey-server",
 		Image:      "ubuntu-24.04",
 		ServerType: "cpx11",
@@ -249,9 +253,10 @@ func TestCreateServer_SSHKeyNotFound(t *testing.T) {
 		},
 	})
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	_, err := provider.CreateServer(domain.CreateServerOpts{
+	_, err := provider.CreateServer(ctx, domain.CreateServerOpts{
 		Name:       "fail-server",
 		Image:      "ubuntu-24.04",
 		ServerType: "cpx11",
@@ -279,9 +284,10 @@ func TestCreateServer_APIError(t *testing.T) {
 		},
 	})
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	_, err := provider.CreateServer(domain.CreateServerOpts{
+	_, err := provider.CreateServer(ctx, domain.CreateServerOpts{
 		Name:       "duplicate-server",
 		Image:      "ubuntu-24.04",
 		ServerType: "cpx11",
@@ -289,8 +295,8 @@ func TestCreateServer_APIError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for API conflict, got nil")
 	}
-	if !strings.Contains(err.Error(), "uniqueness_error") {
-		t.Errorf("expected error to mention 'uniqueness_error', got: %v", err)
+	if !strings.Contains(err.Error(), "conflict") {
+		t.Errorf("expected error to mention 'conflict', got: %v", err)
 	}
 }
 
@@ -323,9 +329,10 @@ func TestCreateServer_WithLabelsAndUserData(t *testing.T) {
 		},
 	})
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	server, err := provider.CreateServer(domain.CreateServerOpts{
+	server, err := provider.CreateServer(ctx, domain.CreateServerOpts{
 		Name:       "labeled-server",
 		Image:      "ubuntu-24.04",
 		ServerType: "cpx11",

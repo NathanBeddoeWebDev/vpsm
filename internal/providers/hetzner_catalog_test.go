@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -25,7 +26,7 @@ func TestListLocations_HappyPath(t *testing.T) {
 	srv := newTestAPI(t, response)
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	locations, err := provider.ListLocations()
+	locations, err := provider.ListLocations(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -51,7 +52,7 @@ func TestListLocations_EmptyList(t *testing.T) {
 	})
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	locations, err := provider.ListLocations()
+	locations, err := provider.ListLocations(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -74,7 +75,7 @@ func TestListLocations_Non200(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	provider := newTestHetznerProvider(srv.URL, "bad-token")
-	_, err := provider.ListLocations()
+	_, err := provider.ListLocations(context.Background())
 	if err == nil {
 		t.Fatal("expected error for 401 response, got nil")
 	}
@@ -126,7 +127,7 @@ func TestListServerTypes_HappyPath(t *testing.T) {
 	srv := newTestAPI(t, response)
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	serverTypes, err := provider.ListServerTypes()
+	serverTypes, err := provider.ListServerTypes(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -184,7 +185,7 @@ func TestListServerTypes_ExcludesDeprecatedLocations(t *testing.T) {
 	srv := newTestAPI(t, response)
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	serverTypes, err := provider.ListServerTypes()
+	serverTypes, err := provider.ListServerTypes(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -218,7 +219,7 @@ func TestListServerTypes_FallsBackToPricesWhenNoLocations(t *testing.T) {
 	srv := newTestAPI(t, response)
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	serverTypes, err := provider.ListServerTypes()
+	serverTypes, err := provider.ListServerTypes(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -244,7 +245,7 @@ func TestListServerTypes_NoPrices(t *testing.T) {
 	srv := newTestAPI(t, response)
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	serverTypes, err := provider.ListServerTypes()
+	serverTypes, err := provider.ListServerTypes(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -267,7 +268,7 @@ func TestListServerTypes_EmptyList(t *testing.T) {
 	})
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	serverTypes, err := provider.ListServerTypes()
+	serverTypes, err := provider.ListServerTypes(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -290,7 +291,7 @@ func TestListServerTypes_Non200(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	provider := newTestHetznerProvider(srv.URL, "test-token")
-	_, err := provider.ListServerTypes()
+	_, err := provider.ListServerTypes(context.Background())
 	if err == nil {
 		t.Fatal("expected error for 500 response, got nil")
 	}
@@ -309,7 +310,7 @@ func TestListImages_HappyPath(t *testing.T) {
 	srv := newTestAPI(t, response)
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	images, err := provider.ListImages()
+	images, err := provider.ListImages(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -334,7 +335,7 @@ func TestListImages_EmptyList(t *testing.T) {
 	})
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	images, err := provider.ListImages()
+	images, err := provider.ListImages(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -357,7 +358,7 @@ func TestListImages_Non200(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	provider := newTestHetznerProvider(srv.URL, "test-token")
-	_, err := provider.ListImages()
+	_, err := provider.ListImages(context.Background())
 	if err == nil {
 		t.Fatal("expected error for 403 response, got nil")
 	}
@@ -387,7 +388,7 @@ func TestListSSHKeys_HappyPath(t *testing.T) {
 	srv := newTestAPI(t, response)
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	keys, err := provider.ListSSHKeys()
+	keys, err := provider.ListSSHKeys(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -412,7 +413,7 @@ func TestListSSHKeys_EmptyList(t *testing.T) {
 	})
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 
-	keys, err := provider.ListSSHKeys()
+	keys, err := provider.ListSSHKeys(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -435,7 +436,7 @@ func TestListSSHKeys_Non200(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	provider := newTestHetznerProvider(srv.URL, "bad-token")
-	_, err := provider.ListSSHKeys()
+	_, err := provider.ListSSHKeys(context.Background())
 	if err == nil {
 		t.Fatal("expected error for 401 response, got nil")
 	}
@@ -451,22 +452,22 @@ func TestCatalogMethods_RequestPaths(t *testing.T) {
 	}{
 		{
 			name:     "ListLocations",
-			call:     func(p *HetznerProvider) error { _, err := p.ListLocations(); return err },
+			call:     func(p *HetznerProvider) error { _, err := p.ListLocations(context.Background()); return err },
 			wantPath: "/locations",
 		},
 		{
 			name:     "ListServerTypes",
-			call:     func(p *HetznerProvider) error { _, err := p.ListServerTypes(); return err },
+			call:     func(p *HetznerProvider) error { _, err := p.ListServerTypes(context.Background()); return err },
 			wantPath: "/server_types",
 		},
 		{
 			name:     "ListImages",
-			call:     func(p *HetznerProvider) error { _, err := p.ListImages(); return err },
+			call:     func(p *HetznerProvider) error { _, err := p.ListImages(context.Background()); return err },
 			wantPath: "/images",
 		},
 		{
 			name:     "ListSSHKeys",
-			call:     func(p *HetznerProvider) error { _, err := p.ListSSHKeys(); return err },
+			call:     func(p *HetznerProvider) error { _, err := p.ListSSHKeys(context.Background()); return err },
 			wantPath: "/ssh_keys",
 		},
 	}

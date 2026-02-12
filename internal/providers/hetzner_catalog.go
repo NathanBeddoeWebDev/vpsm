@@ -15,9 +15,7 @@ import (
 // --- CatalogProvider implementation ---
 
 // ListLocations retrieves all available locations from the Hetzner Cloud API.
-func (h *HetznerProvider) ListLocations() ([]domain.Location, error) {
-	ctx := context.Background()
-
+func (h *HetznerProvider) ListLocations(ctx context.Context) ([]domain.Location, error) {
 	hzLocations, err := h.client.Location.All(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list locations: %w", err)
@@ -32,9 +30,7 @@ func (h *HetznerProvider) ListLocations() ([]domain.Location, error) {
 }
 
 // ListServerTypes retrieves all available server types from the Hetzner Cloud API.
-func (h *HetznerProvider) ListServerTypes() ([]domain.ServerTypeSpec, error) {
-	ctx := context.Background()
-
+func (h *HetznerProvider) ListServerTypes(ctx context.Context) ([]domain.ServerTypeSpec, error) {
 	hzServerTypes, err := h.client.ServerType.All(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list server types: %w", err)
@@ -49,9 +45,7 @@ func (h *HetznerProvider) ListServerTypes() ([]domain.ServerTypeSpec, error) {
 }
 
 // ListImages retrieves all available images from the Hetzner Cloud API.
-func (h *HetznerProvider) ListImages() ([]domain.ImageSpec, error) {
-	ctx := context.Background()
-
+func (h *HetznerProvider) ListImages(ctx context.Context) ([]domain.ImageSpec, error) {
 	hzImages, err := h.client.Image.AllWithOpts(ctx, hcloud.ImageListOpts{
 		Status: []hcloud.ImageStatus{hcloud.ImageStatusAvailable},
 	})
@@ -68,9 +62,7 @@ func (h *HetznerProvider) ListImages() ([]domain.ImageSpec, error) {
 }
 
 // ListSSHKeys retrieves all SSH keys from the Hetzner Cloud API.
-func (h *HetznerProvider) ListSSHKeys() ([]domain.SSHKeySpec, error) {
-	ctx := context.Background()
-
+func (h *HetznerProvider) ListSSHKeys(ctx context.Context) ([]domain.SSHKeySpec, error) {
 	hzKeys, err := h.client.SSHKey.All(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list SSH keys: %w", err)

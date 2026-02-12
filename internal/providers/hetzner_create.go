@@ -12,9 +12,7 @@ import (
 // CreateServer creates a new server on Hetzner Cloud.
 // It maps domain.CreateServerOpts to the hcloud SDK, resolving any
 // names (SSH keys, etc.) to their IDs where required by the API.
-func (h *HetznerProvider) CreateServer(opts domain.CreateServerOpts) (*domain.Server, error) {
-	ctx := context.Background()
-
+func (h *HetznerProvider) CreateServer(ctx context.Context, opts domain.CreateServerOpts) (*domain.Server, error) {
 	hcloudOpts := hcloud.ServerCreateOpts{
 		Name:             opts.Name,
 		ServerType:       &hcloud.ServerType{Name: opts.ServerType},
@@ -43,6 +41,15 @@ func (h *HetznerProvider) CreateServer(opts domain.CreateServerOpts) (*domain.Se
 
 	result, _, err := h.client.Server.Create(ctx, hcloudOpts)
 	if err != nil {
+		if hcloud.IsError(err, hcloud.ErrorCodeUniquenessError) {
+			return nil, fmt.Errorf("failed to create server: %w", domain.ErrConflict)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeUnauthorized) {
+			return nil, fmt.Errorf("failed to create server: %w", domain.ErrUnauthorized)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeRateLimitExceeded) {
+			return nil, fmt.Errorf("failed to create server: %w", domain.ErrRateLimited)
+		}
 		return nil, fmt.Errorf("failed to create server: %w", err)
 	}
 

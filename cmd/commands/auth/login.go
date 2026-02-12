@@ -24,40 +24,40 @@ Example:
 		Run: func(cmd *cobra.Command, args []string) {
 			provider := strings.TrimSpace(args[0])
 			if provider == "" {
-				fmt.Fprintln(os.Stderr, "provider is required")
+				fmt.Fprintln(cmd.ErrOrStderr(), "provider is required")
 				return
 			}
 
 			token, err := cmd.Flags().GetString("token")
 			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
+				fmt.Fprintln(cmd.ErrOrStderr(), err)
 				return
 			}
 
 			token = strings.TrimSpace(token)
 			if token == "" {
-				fmt.Fprint(os.Stdout, "Enter API token: ")
+				fmt.Fprint(cmd.OutOrStdout(), "Enter API token: ")
 				bytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-				fmt.Fprintln(os.Stdout)
+				fmt.Fprintln(cmd.OutOrStdout())
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
+					fmt.Fprintln(cmd.ErrOrStderr(), err)
 					return
 				}
 				token = strings.TrimSpace(string(bytes))
 			}
 
 			if token == "" {
-				fmt.Fprintln(os.Stderr, "token cannot be empty")
+				fmt.Fprintln(cmd.ErrOrStderr(), "token cannot be empty")
 				return
 			}
 
 			store := auth.DefaultStore()
 			if err := store.SetToken(provider, token); err != nil {
-				fmt.Fprintln(os.Stderr, err)
+				fmt.Fprintln(cmd.ErrOrStderr(), err)
 				return
 			}
 
-			fmt.Fprintf(os.Stdout, "Saved token for provider %s\n", provider)
+			fmt.Fprintf(cmd.OutOrStdout(), "Saved token for provider %s\n", provider)
 		},
 	}
 

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -20,13 +21,16 @@ type mockProvider struct {
 }
 
 func (m *mockProvider) GetDisplayName() string { return m.displayName }
-func (m *mockProvider) CreateServer(opts domain.CreateServerOpts) (*domain.Server, error) {
+func (m *mockProvider) CreateServer(_ context.Context, opts domain.CreateServerOpts) (*domain.Server, error) {
 	return nil, fmt.Errorf("not implemented")
 }
-func (m *mockProvider) DeleteServer(id string) error {
+func (m *mockProvider) DeleteServer(_ context.Context, id string) error {
 	return fmt.Errorf("not implemented")
 }
-func (m *mockProvider) ListServers() ([]domain.Server, error) {
+func (m *mockProvider) GetServer(_ context.Context, id string) (*domain.Server, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *mockProvider) ListServers(_ context.Context) ([]domain.Server, error) {
 	return m.servers, m.listErr
 }
 

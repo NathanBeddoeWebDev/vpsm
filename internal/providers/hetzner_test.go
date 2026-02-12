@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -158,8 +159,9 @@ func TestListServers_HappyPath(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
-	servers, err := provider.ListServers()
+	servers, err := provider.ListServers(ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -215,8 +217,9 @@ func TestListServers_EmptyList(t *testing.T) {
 		"servers": []interface{}{},
 	})
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
-	servers, err := provider.ListServers()
+	servers, err := provider.ListServers(ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -236,8 +239,9 @@ func TestListServers_NilOptionalFields(t *testing.T) {
 		"servers": []interface{}{server},
 	})
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
-	servers, err := provider.ListServers()
+	servers, err := provider.ListServers(ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -273,8 +277,9 @@ func TestListServers_Non200StatusCode(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "bad-token")
-	_, err := provider.ListServers()
+	_, err := provider.ListServers(ctx)
 	if err == nil {
 		t.Fatal("expected error for 401 response, got nil")
 	}
@@ -287,8 +292,9 @@ func TestListServers_MalformedJSON(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
-	_, err := provider.ListServers()
+	_, err := provider.ListServers(ctx)
 	if err == nil {
 		t.Fatal("expected error for malformed JSON, got nil")
 	}
@@ -334,7 +340,8 @@ func TestListServers_FactoryViaRegistry(t *testing.T) {
 		t.Fatalf("expected no error from Get, got %v", err)
 	}
 
-	servers, err := provider.ListServers()
+	ctx := context.Background()
+	servers, err := provider.ListServers(ctx)
 	if err != nil {
 		t.Fatalf("expected no error from ListServers, got %v", err)
 	}
@@ -398,16 +405,18 @@ func TestDeleteServer_HappyPath(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
-	err := provider.DeleteServer("42")
+	err := provider.DeleteServer(ctx, "42")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
 }
 
 func TestDeleteServer_InvalidID(t *testing.T) {
+	ctx := context.Background()
 	provider := newTestHetznerProvider("http://unused", "test-token")
-	err := provider.DeleteServer("not-a-number")
+	err := provider.DeleteServer(ctx, "not-a-number")
 	if err == nil {
 		t.Fatal("expected error for non-numeric ID, got nil")
 	}
@@ -429,8 +438,9 @@ func TestDeleteServer_NotFound(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
-	err := provider.DeleteServer("999")
+	err := provider.DeleteServer(ctx, "999")
 	if err == nil {
 		t.Fatal("expected error for 404 response, got nil")
 	}
@@ -449,8 +459,9 @@ func TestDeleteServer_APIError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
+	ctx := context.Background()
 	provider := newTestHetznerProvider(srv.URL, "test-token")
-	err := provider.DeleteServer("42")
+	err := provider.DeleteServer(ctx, "42")
 	if err == nil {
 		t.Fatal("expected error for 500 response, got nil")
 	}

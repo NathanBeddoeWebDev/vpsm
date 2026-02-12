@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -21,14 +22,17 @@ type deleteMockProvider struct {
 }
 
 func (m *deleteMockProvider) GetDisplayName() string { return m.displayName }
-func (m *deleteMockProvider) CreateServer(opts domain.CreateServerOpts) (*domain.Server, error) {
+func (m *deleteMockProvider) CreateServer(_ context.Context, opts domain.CreateServerOpts) (*domain.Server, error) {
 	return nil, fmt.Errorf("not implemented")
 }
-func (m *deleteMockProvider) DeleteServer(id string) error {
+func (m *deleteMockProvider) DeleteServer(_ context.Context, id string) error {
 	m.deletedID = id
 	return m.deleteErr
 }
-func (m *deleteMockProvider) ListServers() ([]domain.Server, error) {
+func (m *deleteMockProvider) GetServer(_ context.Context, id string) (*domain.Server, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *deleteMockProvider) ListServers(_ context.Context) ([]domain.Server, error) {
 	return m.servers, m.listErr
 }
 

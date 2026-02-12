@@ -11,6 +11,10 @@ import (
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 )
 
+// Compile-time check that HetznerProvider satisfies CatalogProvider
+// (which embeds Provider).
+var _ domain.CatalogProvider = (*HetznerProvider)(nil)
+
 // HetznerProvider implements domain.Provider using the Hetzner Cloud API.
 type HetznerProvider struct {
 	client *hcloud.Client
@@ -46,27 +50,65 @@ func (h *HetznerProvider) GetDisplayName() string {
 
 // DeleteServer removes a server by its ID. The ID must be a numeric string
 // matching the Hetzner server ID.
-func (h *HetznerProvider) DeleteServer(id string) error {
+func (h *HetznerProvider) DeleteServer(ctx context.Context, id string) error {
 	numericID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid server ID %q: %w", id, err)
 	}
 
-	ctx := context.Background()
 	_, _, err = h.client.Server.DeleteWithResult(ctx, &hcloud.Server{ID: numericID})
 	if err != nil {
+		if hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
+			return fmt.Errorf("failed to delete server: %w", domain.ErrNotFound)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeUnauthorized) {
+			return fmt.Errorf("failed to delete server: %w", domain.ErrUnauthorized)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeRateLimitExceeded) {
+			return fmt.Errorf("failed to delete server: %w", domain.ErrRateLimited)
+		}
 		return fmt.Errorf("failed to delete server: %w", err)
 	}
 
 	return nil
 }
 
-// ListServers retrieves all servers from the Hetzner Cloud API.
-func (h *HetznerProvider) ListServers() ([]domain.Server, error) {
-	ctx := context.Background()
+// GetServer retrieves a single server by its ID.
+func (h *HetznerProvider) GetServer(ctx context.Context, id string) (*domain.Server, error) {
+	numericID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid server ID %q: %w", id, err)
+	}
 
+	hzServer, _, err := h.client.Server.GetByID(ctx, numericID)
+	if err != nil {
+		if hcloud.IsError(err, hcloud.ErrorCodeUnauthorized) {
+			return nil, fmt.Errorf("failed to get server: %w", domain.ErrUnauthorized)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeRateLimitExceeded) {
+			return nil, fmt.Errorf("failed to get server: %w", domain.ErrRateLimited)
+		}
+		return nil, fmt.Errorf("failed to get server: %w", err)
+	}
+
+	if hzServer == nil {
+		return nil, fmt.Errorf("server %q: %w", id, domain.ErrNotFound)
+	}
+
+	server := toDomainServer(hzServer)
+	return &server, nil
+}
+
+// ListServers retrieves all servers from the Hetzner Cloud API.
+func (h *HetznerProvider) ListServers(ctx context.Context) ([]domain.Server, error) {
 	hzServers, err := h.client.Server.All(ctx)
 	if err != nil {
+		if hcloud.IsError(err, hcloud.ErrorCodeUnauthorized) {
+			return nil, fmt.Errorf("failed to list servers: %w", domain.ErrUnauthorized)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeRateLimitExceeded) {
+			return nil, fmt.Errorf("failed to list servers: %w", domain.ErrRateLimited)
+		}
 		return nil, fmt.Errorf("failed to list servers: %w", err)
 	}
 

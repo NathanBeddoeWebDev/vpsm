@@ -30,7 +30,7 @@ func DeleteServerForm(provider domain.Provider) (*domain.Server, error) {
 		Output(os.Stderr).
 		ActionWithErr(func(ctx context.Context) error {
 			var err error
-			servers, err = provider.ListServers()
+			servers, err = provider.ListServers(ctx)
 			return err
 		}).
 		Run()

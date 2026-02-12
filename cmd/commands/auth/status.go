@@ -3,7 +3,6 @@ package auth
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
@@ -24,7 +23,7 @@ Example:
 			providerNames := providers.List()
 
 			if len(providerNames) == 0 {
-				fmt.Fprintln(os.Stdout, "No providers registered.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No providers registered.")
 				return
 			}
 
@@ -32,11 +31,11 @@ Example:
 				_, err := store.GetToken(provider)
 				switch {
 				case err == nil:
-					fmt.Fprintf(os.Stdout, "%s: logged in ✅\n", provider)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s: logged in ✅\n", provider)
 				case errors.Is(err, auth.ErrTokenNotFound):
-					fmt.Fprintf(os.Stdout, "%s: not logged in\n", provider)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s: not logged in\n", provider)
 				default:
-					fmt.Fprintf(os.Stdout, "%s: error (%v)\n", provider, err)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s: error (%v)\n", provider, err)
 				}
 			}
 		},

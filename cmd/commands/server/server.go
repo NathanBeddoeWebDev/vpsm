@@ -1,6 +1,3 @@
-/*
-Copyright © 2026 NAME HERE <EMAIL ADDRESS>
-*/
 package server
 
 import (
@@ -13,12 +10,9 @@ import (
 
 func NewCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "server",
-		Short: "Manage servers across cloud providers",
-		Long:  `Create, list, and delete servers from your configured cloud providers.`,
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("server called")
-		},
+		Use:               "server",
+		Short:             "Manage servers across cloud providers",
+		Long:              `Create, list, and delete servers from your configured cloud providers.`,
 		PersistentPreRunE: resolveProvider,
 	}
 
