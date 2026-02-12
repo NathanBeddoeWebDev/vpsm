@@ -44,10 +44,6 @@ func (h *HetznerProvider) GetDisplayName() string {
 	return "Hetzner"
 }
 
-func (h *HetznerProvider) CreateServer(opts domain.CreateServerOpts) (*domain.Server, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
 func (h *HetznerProvider) DeleteServer(id string) error {
 	return fmt.Errorf("not implemented")
 }

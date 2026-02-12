@@ -51,14 +51,6 @@ func testLocationJSON(id int, name, country, city string) map[string]interface{}
 	}
 }
 
-// testDatacenterJSON builds a Hetzner API datacenter object with a nested location.
-func testDatacenterJSON(id int, name string, location map[string]interface{}) map[string]interface{} {
-	return map[string]interface{}{
-		"id": id, "name": name, "description": name,
-		"location": location,
-	}
-}
-
 // testServerTypeJSON builds a Hetzner API server_type object.
 func testServerTypeJSON(id int, name, arch string) map[string]interface{} {
 	return map[string]interface{}{
@@ -83,7 +75,7 @@ func testImageJSON(id int, name, osFlavor, osVersion, arch string) map[string]in
 
 // testServerJSON builds a minimal Hetzner API server object with sensible defaults.
 // The returned map can be modified before being used in a response.
-func testServerJSON(id int, name, status, created string, loc map[string]interface{}, dc map[string]interface{}, st map[string]interface{}) map[string]interface{} {
+func testServerJSON(id int, name, status, created string, loc map[string]interface{}, st map[string]interface{}) map[string]interface{} {
 	return map[string]interface{}{
 		"id":      id,
 		"name":    name,
@@ -97,7 +89,6 @@ func testServerJSON(id int, name, status, created string, loc map[string]interfa
 		"server_type":    st,
 		"image":          nil,
 		"location":       loc,
-		"datacenter":     dc,
 		"labels":         map[string]interface{}{},
 		"volumes":        []interface{}{},
 		"load_balancers": []interface{}{},
@@ -115,7 +106,7 @@ func TestListServers_HappyPath(t *testing.T) {
 	fsn1 := testLocationJSON(1, "fsn1", "DE", "Falkenstein")
 	nbg1 := testLocationJSON(2, "nbg1", "DE", "Nuremberg")
 
-	server1 := testServerJSON(42, "web-server", "running", createdStr, fsn1, testDatacenterJSON(1, "fsn1-dc14", fsn1), testServerTypeJSON(1, "cpx11", "x86"))
+	server1 := testServerJSON(42, "web-server", "running", createdStr, fsn1, testServerTypeJSON(1, "cpx11", "x86"))
 	server1["public_net"] = map[string]interface{}{
 		"ipv4":         map[string]interface{}{"ip": "1.2.3.4", "blocked": false},
 		"ipv6":         map[string]interface{}{"ip": "2001:db8::/64", "blocked": false},
@@ -127,7 +118,7 @@ func TestListServers_HappyPath(t *testing.T) {
 	}
 	server1["image"] = testImageJSON(1, "ubuntu-24.04", "ubuntu", "24.04", "x86")
 
-	server2 := testServerJSON(99, "db-server", "stopped", createdStr, nbg1, testDatacenterJSON(2, "nbg1-dc3", nbg1), testServerTypeJSON(2, "cpx22", "arm"))
+	server2 := testServerJSON(99, "db-server", "stopped", createdStr, nbg1, testServerTypeJSON(2, "cpx22", "arm"))
 	server2["public_net"] = map[string]interface{}{
 		"ipv4":         map[string]interface{}{"ip": "5.6.7.8", "blocked": false},
 		"floating_ips": []interface{}{},
@@ -222,7 +213,7 @@ func TestListServers_EmptyList(t *testing.T) {
 func TestListServers_NilOptionalFields(t *testing.T) {
 	loc := testLocationJSON(3, "hel1", "FI", "Helsinki")
 
-	server := testServerJSON(1, "bare-server", "running", "2024-06-15T12:00:00+00:00", loc, testDatacenterJSON(3, "hel1-dc2", loc), testServerTypeJSON(1, "cx11", "x86"))
+	server := testServerJSON(1, "bare-server", "running", "2024-06-15T12:00:00+00:00", loc, testServerTypeJSON(1, "cx11", "x86"))
 	// image is already nil from testServerJSON
 	// public_net has no ipv4/ipv6 entries, private_net is empty
 
@@ -291,7 +282,7 @@ func TestListServers_MalformedJSON(t *testing.T) {
 func TestListServers_FactoryViaRegistry(t *testing.T) {
 	loc := testLocationJSON(4, "ash", "US", "Ashburn")
 
-	server := testServerJSON(7, "registry-server", "running", "2024-06-15T12:00:00+00:00", loc, testDatacenterJSON(4, "ash-dc1", loc), testServerTypeJSON(3, "cpx31", "x86"))
+	server := testServerJSON(7, "registry-server", "running", "2024-06-15T12:00:00+00:00", loc, testServerTypeJSON(3, "cpx31", "x86"))
 
 	response := map[string]interface{}{
 		"servers": []interface{}{server},
