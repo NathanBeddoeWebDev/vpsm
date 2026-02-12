@@ -20,8 +20,8 @@ func ShowCommand() *cobra.Command {
 		Short: "Show details for a server",
 		Long: `Display detailed information about a single server.
 
-If --id is not provided, an interactive TUI will let you select a server
-from the current list. Requires a terminal; use --id for scripting.
+If --id is not provided, this behaves like vpsm server list: an interactive
+TUI in a terminal, or table/json output in non-interactive mode.
 
 Examples:
   # Interactive mode (TUI)
@@ -53,24 +53,33 @@ func runShow(cmd *cobra.Command, args []string) {
 	serverID, _ := cmd.Flags().GetString("id")
 
 	if serverID == "" {
-		// Interactive mode requires a terminal.
-		if !term.IsTerminal(int(os.Stdout.Fd())) {
-			fmt.Fprintln(cmd.ErrOrStderr(), "Error: --id is required when not running in a terminal")
+		output, _ := cmd.Flags().GetString("output")
+		outputChanged := cmd.Flags().Changed("output")
+		if outputChanged || !term.IsTerminal(int(os.Stdout.Fd())) {
+			if output == "" {
+				output = "table"
+			}
+			runListNonInteractive(cmd, provider, output)
 			return
 		}
 
-		result, err := tui.RunServerShow(provider, providerName, "")
+		selected, action, err := tui.RunServerList(provider, providerName)
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 			return
 		}
-		if result == nil {
-			return
-		}
 
-		// Handle action from the detail view.
-		if result.Action == "delete" && result.Server != nil {
-			runDeleteFromList(cmd, provider, providerName, result.Server)
+		switch action {
+		case "show":
+			if selected != nil {
+				runShowFromList(cmd, provider, providerName, selected)
+			}
+		case "delete":
+			if selected != nil {
+				runDeleteFromList(cmd, provider, providerName, selected)
+			}
+		case "create":
+			runCreateFromList(cmd, provider, providerName)
 		}
 		return
 	}
