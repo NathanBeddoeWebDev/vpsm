@@ -1,7 +1,6 @@
 package sshkey
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -23,8 +22,9 @@ func AddCommand() *cobra.Command {
 		Short: "Upload an SSH key to the cloud provider",
 		Long: `Upload a local SSH public key to the cloud provider's account.
 
-The path argument is optional and defaults to ~/.ssh/id_ed25519.pub.
-If that file does not exist, you will be prompted to provide a path.
+Provide a path argument or use --public-key to paste the key directly.
+If no path argument is provided, you will be prompted with the default path (~/.ssh/id_ed25519.pub) prefilled.
+If the selected file does not exist, you will be asked to provide another path.
 
 The key name will be prompted interactively unless --name is specified.
 
@@ -35,12 +35,16 @@ Examples:
   # Upload specific key with explicit name
   vpsm ssh-key add ~/.ssh/work_laptop.pub --name work-laptop
 
+  # Paste public key directly
+  vpsm ssh-key add --public-key "ssh-ed25519 AAAA..." --name laptop
+
   # Upload with provider override
   vpsm ssh-key add --provider hetzner --name my-key`,
 		Run: runAdd,
 	}
 
 	cmd.Flags().String("name", "", "Name for the SSH key (interactive prompt if not provided)")
+	cmd.Flags().String("public-key", "", "Public SSH key content (paste instead of providing a path)")
 
 	return cmd
 }
@@ -60,58 +64,75 @@ func runAdd(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Determine path
-	usingDefault := len(args) == 0
-	var keyPath string
-	if usingDefault {
-		keyPath = defaultSSHKeyPath()
-	} else {
-		keyPath = args[0]
-	}
-
-	keyPath, err = expandHomePath(keyPath)
-	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+	publicKeyInput, _ := cmd.Flags().GetString("public-key")
+	publicKeyProvided := cmd.Flags().Changed("public-key")
+	if publicKeyProvided && len(args) > 0 {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error: provide a path or --public-key, not both\n")
 		return
 	}
 
-	// Check if file exists
-	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+	var keyPath string
+	var publicKey string
+	if publicKeyProvided {
+		publicKey, err = validateSSHKey(publicKeyInput)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+			return
+		}
+	} else {
+		// Determine path
+		usingDefault := len(args) == 0
 		if usingDefault {
+			keyPath = defaultSSHKeyPath()
+			defaultExpanded, err := expandHomePath(keyPath)
+			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+				return
+			}
+			if _, err := os.Stat(defaultExpanded); os.IsNotExist(err) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Default SSH key not found at %s\n", keyPath)
+			}
+
 			keyPath, err = promptForSSHKeyPath(cmd, keyPath)
 			if err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 				printCommonSSHKeyPaths(cmd)
 				return
 			}
-
-			keyPath, err = expandHomePath(keyPath)
-			if err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-				return
-			}
+		} else {
+			keyPath = args[0]
 		}
 
+		keyPath, err = expandHomePath(keyPath)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+			return
+		}
+
+		// Check if file exists
 		if _, err := os.Stat(keyPath); os.IsNotExist(err) {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error: SSH key file not found: %s\n", keyPath)
 			printCommonSSHKeyPaths(cmd)
 			return
 		}
-	}
 
-	fmt.Fprintf(cmd.ErrOrStderr(), "Reading key from %s\n", keyPath)
+		fmt.Fprintf(cmd.ErrOrStderr(), "Reading key from %s\n", keyPath)
 
-	// Read and validate the SSH key
-	publicKey, err := readAndValidateSSHKey(keyPath)
-	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		// Read and validate the SSH key
+		publicKey, err = readAndValidateSSHKey(keyPath)
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+			return
+		}
 	}
 
 	// Get or prompt for name
 	keyName, _ := cmd.Flags().GetString("name")
 	if keyName == "" {
-		suggestedName := suggestKeyName(keyPath)
+		suggestedName := defaultKeyName()
+		if keyPath != "" {
+			suggestedName = suggestKeyName(keyPath)
+		}
 		accessible := os.Getenv("ACCESSIBLE") != ""
 
 		form := huh.NewForm(
@@ -168,24 +189,34 @@ func expandHomePath(path string) (string, error) {
 	return path, nil
 }
 
-func promptForSSHKeyPath(cmd *cobra.Command, missingPath string) (string, error) {
-	fmt.Fprintf(cmd.ErrOrStderr(), "Default SSH key not found at %s\n", missingPath)
-	fmt.Fprint(cmd.ErrOrStderr(), "Enter path to SSH public key: ")
+func promptForSSHKeyPath(cmd *cobra.Command, defaultPath string) (string, error) {
+	keyPath := defaultPath
+	accessible := os.Getenv("ACCESSIBLE") != ""
 
-	scanner := bufio.NewScanner(cmd.InOrStdin())
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return "", err
-		}
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Enter path to SSH public key").
+				Value(&keyPath).
+				Validate(func(s string) error {
+					if strings.TrimSpace(s) == "" {
+						return fmt.Errorf("path cannot be empty")
+					}
+					return nil
+				}),
+		),
+	).WithAccessible(accessible)
+
+	if err := form.Run(); err != nil {
+		return "", err
+	}
+
+	keyPath = strings.TrimSpace(keyPath)
+	if keyPath == "" {
 		return "", fmt.Errorf("no SSH key path provided")
 	}
 
-	input := strings.TrimSpace(scanner.Text())
-	if input == "" {
-		return "", fmt.Errorf("no SSH key path provided")
-	}
-
-	return input, nil
+	return keyPath, nil
 }
 
 func readAndValidateSSHKey(path string) (string, error) {
@@ -197,6 +228,15 @@ func readAndValidateSSHKey(path string) (string, error) {
 	publicKey := strings.TrimSpace(string(data))
 	if publicKey == "" {
 		return "", fmt.Errorf("SSH key file is empty")
+	}
+
+	return validateSSHKey(publicKey)
+}
+
+func validateSSHKey(publicKey string) (string, error) {
+	publicKey = strings.TrimSpace(publicKey)
+	if publicKey == "" {
+		return "", fmt.Errorf("SSH key cannot be empty")
 	}
 
 	// Basic validation: check that it looks like a public key
@@ -219,6 +259,17 @@ func readAndValidateSSHKey(path string) (string, error) {
 	}
 
 	return publicKey, nil
+}
+
+func defaultKeyName() string {
+	if hostname, err := os.Hostname(); err == nil {
+		name := strings.TrimSpace(hostname)
+		if name != "" {
+			return name
+		}
+	}
+
+	return "ssh-key"
 }
 
 func suggestKeyName(path string) string {

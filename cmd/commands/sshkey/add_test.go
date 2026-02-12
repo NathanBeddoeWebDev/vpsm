@@ -128,6 +128,49 @@ func TestAddCommand_WithNameFlag(t *testing.T) {
 	}
 }
 
+func TestAddCommand_PublicKeyFlag(t *testing.T) {
+	keyContent := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyData12345 test@example.com"
+
+	mock := &sshKeyMockProvider{
+		displayName: "Mock",
+	}
+	registerSSHKeyMockProvider(t, "mock", mock)
+
+	stdout, stderr := execAdd(t, "mock", "--public-key", keyContent, "--name", "pasted-key")
+
+	if mock.capturedName != "pasted-key" {
+		t.Errorf("expected CreateSSHKey called with name 'pasted-key', got %q", mock.capturedName)
+	}
+	if mock.capturedPublicKey != keyContent {
+		t.Errorf("expected public key to be passed, got %q", mock.capturedPublicKey)
+	}
+	if !strings.Contains(stdout, "SSH key added") {
+		t.Errorf("expected 'SSH key added' on stdout, got:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "Uploading SSH key") {
+		t.Errorf("expected 'Uploading SSH key' on stderr, got:\n%s", stderr)
+	}
+}
+
+func TestAddCommand_PathAndPublicKeyConflict(t *testing.T) {
+	keyContent := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyData12345 test@example.com"
+	keyPath := createTempSSHKey(t, keyContent)
+
+	mock := &sshKeyMockProvider{
+		displayName: "Mock",
+	}
+	registerSSHKeyMockProvider(t, "mock", mock)
+
+	_, stderr := execAdd(t, "mock", keyPath, "--public-key", keyContent, "--name", "pasted-key")
+
+	if !strings.Contains(stderr, "provide a path or --public-key") {
+		t.Errorf("expected conflict error on stderr, got:\n%s", stderr)
+	}
+	if mock.capturedName != "" {
+		t.Errorf("expected CreateSSHKey not to be called, but it was called with name %q", mock.capturedName)
+	}
+}
+
 func TestAddCommand_RSAKey(t *testing.T) {
 	keyContent := "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC... user@host"
 	keyPath := createTempSSHKey(t, keyContent)
