@@ -9,7 +9,7 @@ import (
 type HetznerProvider struct{}
 
 func RegisterHetzner() {
-	Register("hetzner", func() Provider {
+	Register("hetzner", func() domain.Provider {
 		return &HetznerProvider{}
 	})
 }

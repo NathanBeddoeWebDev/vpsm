@@ -2,11 +2,12 @@ package providers
 
 import (
 	"fmt"
+	"nathanbeddoewebdev/vpsm/internal/domain"
 	"strings"
 	"sync"
 )
 
-type Factory func() Provider
+type Factory func() domain.Provider
 
 var (
 	mu       sync.RWMutex
@@ -35,7 +36,7 @@ func Register(name string, factory Factory) {
 	registry[normalizedName] = factory
 }
 
-func Get(name string) (Provider, error) {
+func Get(name string) (domain.Provider, error) {
 	normalizedName := normalize(name)
 	mu.RLock()
 	factory, ok := registry[normalizedName]
