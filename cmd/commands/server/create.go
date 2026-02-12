@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -181,7 +180,7 @@ func runCreate(cmd *cobra.Command, args []string) {
 	case "json":
 		printServerJSON(cmd, server)
 	default:
-		printServerTable(cmd, server)
+		printCreateTable(cmd, server)
 	}
 }
 
@@ -234,36 +233,17 @@ func parseLabels(labels []string) map[string]string {
 	return result
 }
 
-func printServerTable(cmd *cobra.Command, server *domain.Server) {
-	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
+func printCreateTable(cmd *cobra.Command, server *domain.Server) {
+	fmt.Fprintln(cmd.OutOrStdout(), "✓ Server created successfully!")
+	fmt.Fprintln(cmd.OutOrStdout())
 
-	fmt.Fprintln(w, "✓ Server created successfully!")
-	fmt.Fprintln(w)
-	fmt.Fprintf(w, "  ID:\t%s\n", server.ID)
-	fmt.Fprintf(w, "  Name:\t%s\n", server.Name)
-	fmt.Fprintf(w, "  Status:\t%s\n", server.Status)
-	fmt.Fprintf(w, "  Type:\t%s\n", server.ServerType)
-	fmt.Fprintf(w, "  Image:\t%s\n", server.Image)
-	fmt.Fprintf(w, "  Region:\t%s\n", server.Region)
-
-	if server.PublicIPv4 != "" {
-		fmt.Fprintf(w, "  IPv4:\t%s\n", server.PublicIPv4)
-	}
-	if server.PublicIPv6 != "" {
-		fmt.Fprintf(w, "  IPv6:\t%s\n", server.PublicIPv6)
-	}
+	printServerDetail(cmd, server)
 
 	if pw, ok := server.Metadata["root_password"].(string); ok && pw != "" {
+		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w)
 		fmt.Fprintf(w, "  ⚠ Root Password:\t%s\n", pw)
 		fmt.Fprintln(w, "  Save this now — it will not be shown again.")
+		w.Flush()
 	}
-
-	w.Flush()
-}
-
-func printServerJSON(cmd *cobra.Command, server *domain.Server) {
-	enc := json.NewEncoder(cmd.OutOrStdout())
-	enc.SetIndent("", "  ")
-	enc.Encode(server)
 }

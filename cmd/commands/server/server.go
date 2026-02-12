@@ -12,13 +12,14 @@ func NewCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "server",
 		Short:             "Manage servers across cloud providers",
-		Long:              `Create, list, and delete servers from your configured cloud providers.`,
+		Long:              `Create, list, show, and delete servers from your configured cloud providers.`,
 		PersistentPreRunE: resolveProvider,
 	}
 
 	cmd.AddCommand(CreateCommand())
 	cmd.AddCommand(DeleteCommand())
 	cmd.AddCommand(ListCommand())
+	cmd.AddCommand(ShowCommand())
 
 	cmd.PersistentFlags().String("provider", "", "Cloud provider to use (overrides default)")
 

@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -417,6 +418,127 @@ func TestListServers_FactoryMissingToken(t *testing.T) {
 	_, err := Get("test-hetzner", store)
 	if err == nil {
 		t.Fatal("expected error for missing token, got nil")
+	}
+}
+
+// --- GetServer tests ---
+
+func TestGetServer_HappyPath(t *testing.T) {
+	const createdStr = "2024-06-15T12:00:00+00:00"
+	created, _ := time.Parse(time.RFC3339, createdStr)
+
+	fsn1 := testLocationJSON(1, "fsn1", "DE", "Falkenstein")
+
+	server := testServerJSON(42, "web-server", "running", createdStr, fsn1, testServerTypeJSON(1, "cpx11", "x86"))
+	server["public_net"] = map[string]interface{}{
+		"ipv4":         map[string]interface{}{"ip": "1.2.3.4", "blocked": false},
+		"ipv6":         map[string]interface{}{"ip": "2001:db8::/64", "blocked": false},
+		"floating_ips": []interface{}{},
+		"firewalls":    []interface{}{},
+	}
+	server["image"] = testImageJSON(1, "ubuntu-24.04", "ubuntu", "24.04", "x86")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET method, got %s", r.Method)
+		}
+		if r.URL.Path != "/servers/42" {
+			t.Errorf("expected path /servers/42, got %s", r.URL.Path)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"server": server,
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx := context.Background()
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
+	got, err := provider.GetServer(ctx, "42")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	want := &domain.Server{
+		ID:         "42",
+		Name:       "web-server",
+		Status:     "running",
+		CreatedAt:  created,
+		PublicIPv4: "1.2.3.4",
+		PublicIPv6: "2001:db8::",
+		Region:     "fsn1",
+		ServerType: "cpx11",
+		Image:      "ubuntu-24.04",
+		Provider:   "hetzner",
+		Metadata: map[string]interface{}{
+			"hetzner_id":   int64(42),
+			"architecture": "x86",
+		},
+	}
+
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("GetServer mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestGetServer_InvalidID(t *testing.T) {
+	ctx := context.Background()
+	provider := newTestHetznerProvider(t, "http://unused", "test-token")
+	_, err := provider.GetServer(ctx, "not-a-number")
+	if err == nil {
+		t.Fatal("expected error for non-numeric ID, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid server ID") {
+		t.Errorf("expected 'invalid server ID' in error, got: %v", err)
+	}
+}
+
+func TestGetServer_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]interface{}{
+				"code":    "not_found",
+				"message": "server with ID '999' not found",
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx := context.Background()
+	provider := newTestHetznerProvider(t, srv.URL, "test-token")
+	_, err := provider.GetServer(ctx, "999")
+	if err == nil {
+		t.Fatal("expected error for non-existent server, got nil")
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+func TestGetServer_Unauthorized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]interface{}{
+				"code":    "unauthorized",
+				"message": "unable to authenticate",
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx := context.Background()
+	provider := newTestHetznerProvider(t, srv.URL, "bad-token")
+	_, err := provider.GetServer(ctx, "42")
+	if err == nil {
+		t.Fatal("expected error for 401 response, got nil")
+	}
+	if !errors.Is(err, domain.ErrUnauthorized) {
+		t.Errorf("expected ErrUnauthorized, got: %v", err)
 	}
 }
 
