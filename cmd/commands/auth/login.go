@@ -8,9 +8,8 @@ import (
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 	"nathanbeddoewebdev/vpsm/internal/tui"
 
-	"golang.org/x/term"
-
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func LoginCommand() *cobra.Command {
@@ -40,7 +39,7 @@ Example:
 
 			if token == "" {
 				// Interactive mode: use TUI if running in a terminal.
-				if term.IsTerminal(int(os.Stdin.Fd())) {
+				if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
 					result, err := tui.RunAuthLogin(provider, store)
 					if err != nil {
 						fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
@@ -54,15 +53,8 @@ Example:
 					return
 				}
 
-				// Fallback for non-terminal (pipe).
-				fmt.Fprint(cmd.OutOrStdout(), "Enter API token: ")
-				bytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-				fmt.Fprintln(cmd.OutOrStdout())
-				if err != nil {
-					fmt.Fprintln(cmd.ErrOrStderr(), err)
-					return
-				}
-				token = strings.TrimSpace(string(bytes))
+				fmt.Fprintln(cmd.ErrOrStderr(), "Error: non-interactive login requires --token")
+				return
 			}
 
 			if token == "" {
