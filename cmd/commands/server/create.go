@@ -14,8 +14,8 @@ import (
 	"nathanbeddoewebdev/vpsm/internal/tui"
 	"nathanbeddoewebdev/vpsm/internal/util"
 
-	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func CreateCommand() *cobra.Command {
@@ -126,6 +126,13 @@ func runCreate(cmd *cobra.Command, args []string) {
 
 	useInteractive := len(missing) > 0
 	if useInteractive {
+		// Interactive mode requires a terminal.
+		if !term.IsTerminal(int(os.Stdout.Fd())) {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: missing required flag(s): %s\n", strings.Join(missing, ", "))
+			fmt.Fprintln(cmd.ErrOrStderr(), "Interactive mode requires a terminal. Provide all flags for non-interactive use.")
+			return
+		}
+
 		catalogProvider, ok := provider.(domain.CatalogProvider)
 		if !ok {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error: missing required flag(s): %s\n", strings.Join(missing, ", "))
@@ -133,7 +140,7 @@ func runCreate(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		finalOpts, err := tui.CreateServerForm(catalogProvider, opts)
+		finalOpts, err := tui.RunServerCreate(catalogProvider, providerName, opts)
 		if err != nil {
 			if errors.Is(err, tui.ErrAborted) {
 				fmt.Fprintln(cmd.ErrOrStderr(), "Server creation cancelled.")
@@ -142,33 +149,16 @@ func runCreate(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 			return
 		}
+		if finalOpts == nil {
+			return
+		}
 		opts = *finalOpts
 	}
 
 	logCreateOpts(cmd, opts)
 
 	ctx := context.Background()
-
-	var server *domain.Server
-	if useInteractive {
-		accessible := os.Getenv("ACCESSIBLE") != ""
-		var createErr error
-		spinErr := spinner.New().
-			Title("Creating server...").
-			Accessible(accessible).
-			Output(cmd.ErrOrStderr()).
-			Action(func() {
-				server, createErr = provider.CreateServer(ctx, opts)
-			}).
-			Run()
-		if spinErr != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", spinErr)
-			return
-		}
-		err = createErr
-	} else {
-		server, err = provider.CreateServer(ctx, opts)
-	}
+	server, err := provider.CreateServer(ctx, opts)
 	if err != nil {
 		logCreateOptsFull(cmd, opts)
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error creating server: %v\n", err)
@@ -234,7 +224,7 @@ func parseLabels(labels []string) map[string]string {
 }
 
 func printCreateTable(cmd *cobra.Command, server *domain.Server) {
-	fmt.Fprintln(cmd.OutOrStdout(), "✓ Server created successfully!")
+	fmt.Fprintln(cmd.OutOrStdout(), "Server created successfully!")
 	fmt.Fprintln(cmd.OutOrStdout())
 
 	printServerDetail(cmd, server)
@@ -242,8 +232,8 @@ func printCreateTable(cmd *cobra.Command, server *domain.Server) {
 	if pw, ok := server.Metadata["root_password"].(string); ok && pw != "" {
 		w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w)
-		fmt.Fprintf(w, "  ⚠ Root Password:\t%s\n", pw)
-		fmt.Fprintln(w, "  Save this now — it will not be shown again.")
+		fmt.Fprintf(w, "  Root Password:\t%s\n", pw)
+		fmt.Fprintln(w, "  Save this now - it will not be shown again.")
 		w.Flush()
 	}
 }

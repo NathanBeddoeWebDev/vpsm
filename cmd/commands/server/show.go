@@ -2,17 +2,15 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 
-	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 	"nathanbeddoewebdev/vpsm/internal/tui"
 
-	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // ShowCommand returns a cobra.Command that displays details for a single server.
@@ -23,7 +21,7 @@ func ShowCommand() *cobra.Command {
 		Long: `Display detailed information about a single server.
 
 If --id is not provided, an interactive TUI will let you select a server
-from the current list.
+from the current list. Requires a terminal; use --id for scripting.
 
 Examples:
   # Interactive mode (TUI)
@@ -53,47 +51,36 @@ func runShow(cmd *cobra.Command, args []string) {
 	}
 
 	serverID, _ := cmd.Flags().GetString("id")
-	useInteractive := serverID == ""
 
-	var server *domain.Server
+	if serverID == "" {
+		// Interactive mode requires a terminal.
+		if !term.IsTerminal(int(os.Stdout.Fd())) {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Error: --id is required when not running in a terminal")
+			return
+		}
 
-	if useInteractive {
-		selected, err := tui.ShowServerForm(provider)
+		result, err := tui.RunServerShow(provider, providerName, "")
 		if err != nil {
-			if errors.Is(err, tui.ErrShowAborted) {
-				fmt.Fprintln(cmd.ErrOrStderr(), "Server selection cancelled.")
-				return
-			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 			return
 		}
+		if result == nil {
+			return
+		}
 
-		// Fetch the full server details via GetServer for the freshest data.
-		accessible := os.Getenv("ACCESSIBLE") != ""
-		var getErr error
-		spinErr := spinner.New().
-			Title("Fetching server details...").
-			Accessible(accessible).
-			Output(cmd.ErrOrStderr()).
-			Action(func() {
-				server, getErr = provider.GetServer(context.Background(), selected.ID)
-			}).
-			Run()
-		if spinErr != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", spinErr)
-			return
+		// Handle action from the detail view.
+		if result.Action == "delete" && result.Server != nil {
+			runDeleteFromList(cmd, provider, providerName, result.Server)
 		}
-		if getErr != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error fetching server: %v\n", getErr)
-			return
-		}
-	} else {
-		ctx := context.Background()
-		server, err = provider.GetServer(ctx, serverID)
-		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error fetching server: %v\n", err)
-			return
-		}
+		return
+	}
+
+	// Non-interactive mode: fetch and display directly.
+	ctx := context.Background()
+	server, err := provider.GetServer(ctx, serverID)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error fetching server: %v\n", err)
+		return
 	}
 
 	output, _ := cmd.Flags().GetString("output")

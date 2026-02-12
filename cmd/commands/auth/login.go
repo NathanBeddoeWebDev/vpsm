@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
+	"nathanbeddoewebdev/vpsm/internal/tui"
 
 	"golang.org/x/term"
 
@@ -35,7 +36,25 @@ Example:
 			}
 
 			token = strings.TrimSpace(token)
+			store := auth.DefaultStore()
+
 			if token == "" {
+				// Interactive mode: use TUI if running in a terminal.
+				if term.IsTerminal(int(os.Stdin.Fd())) {
+					result, err := tui.RunAuthLogin(provider, store)
+					if err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+						return
+					}
+					if result != nil && result.Saved {
+						fmt.Fprintf(cmd.OutOrStdout(), "Saved token for provider %s\n", provider)
+					} else {
+						fmt.Fprintln(cmd.ErrOrStderr(), "Login cancelled.")
+					}
+					return
+				}
+
+				// Fallback for non-terminal (pipe).
 				fmt.Fprint(cmd.OutOrStdout(), "Enter API token: ")
 				bytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 				fmt.Fprintln(cmd.OutOrStdout())
@@ -51,7 +70,6 @@ Example:
 				return
 			}
 
-			store := auth.DefaultStore()
 			if err := store.SetToken(provider, token); err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), err)
 				return
