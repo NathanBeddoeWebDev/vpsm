@@ -10,7 +10,7 @@ import (
 func TestGet_DefaultProvider_NotSet(t *testing.T) {
 	setupTestConfig(t)
 
-	stdout, stderr := execConfig(t, "get", "default-provider")
+	stdout, stderr := execConfig(t, "get", "--key", "default-provider")
 
 	if stderr != "" {
 		t.Errorf("unexpected stderr: %s", stderr)
@@ -29,7 +29,7 @@ func TestGet_DefaultProvider_Set(t *testing.T) {
 		t.Fatalf("failed to save config: %v", err)
 	}
 
-	stdout, stderr := execConfig(t, "get", "default-provider")
+	stdout, stderr := execConfig(t, "get", "--key", "default-provider")
 
 	if stderr != "" {
 		t.Errorf("unexpected stderr: %s", stderr)
@@ -42,7 +42,7 @@ func TestGet_DefaultProvider_Set(t *testing.T) {
 func TestGet_UnknownKey(t *testing.T) {
 	setupTestConfig(t)
 
-	_, stderr := execConfig(t, "get", "bogus-key")
+	_, stderr := execConfig(t, "get", "--key", "bogus-key")
 
 	if !strings.Contains(stderr, "unknown configuration key") {
 		t.Errorf("expected 'unknown configuration key' error, got: %s", stderr)

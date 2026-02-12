@@ -2,18 +2,20 @@ package sshkey
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
+	"nathanbeddoewebdev/vpsm/internal/sshkeys"
+	"nathanbeddoewebdev/vpsm/internal/tui"
 
-	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func AddCommand() *cobra.Command {
@@ -71,88 +73,77 @@ func runAdd(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	var keyPath string
+	keyName, _ := cmd.Flags().GetString("name")
+	keyName = strings.TrimSpace(keyName)
+
+	needsInteractive := keyName == "" || (!publicKeyProvided && len(args) == 0)
 	var publicKey string
-	if publicKeyProvided {
-		publicKey, err = validateSSHKey(publicKeyInput)
+	var keyPath string
+
+	if needsInteractive {
+		if !term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Error: interactive mode requires a terminal. Provide --name and a key input to run non-interactively.")
+			return
+		}
+
+		prefill := tui.SSHKeyAddPrefill{Name: keyName}
+		if publicKeyProvided {
+			prefill.Source = tui.SSHKeySourcePaste
+			prefill.PublicKey = publicKeyInput
+		} else if len(args) > 0 {
+			prefill.Source = tui.SSHKeySourceFile
+			prefill.Path = args[0]
+		}
+
+		var result *tui.SSHKeyAddResult
+		var err error
+		if os.Getenv("ACCESSIBLE") != "" {
+			result, err = tui.RunSSHKeyAddAccessible(providerName, prefill)
+		} else {
+			result, err = tui.RunSSHKeyAdd(providerName, prefill)
+		}
 		if err != nil {
+			if errors.Is(err, tui.ErrAborted) {
+				fmt.Fprintln(cmd.ErrOrStderr(), "SSH key add cancelled.")
+				return
+			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 			return
 		}
-	} else {
-		// Determine path
-		usingDefault := len(args) == 0
-		if usingDefault {
-			keyPath = defaultSSHKeyPath()
-			defaultExpanded, err := expandHomePath(keyPath)
-			if err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-				return
-			}
-			if _, err := os.Stat(defaultExpanded); os.IsNotExist(err) {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Default SSH key not found at %s\n", keyPath)
-			}
+		if result == nil {
+			fmt.Fprintln(cmd.ErrOrStderr(), "SSH key add cancelled.")
+			return
+		}
 
-			keyPath, err = promptForSSHKeyPath(cmd, keyPath)
+		publicKey = result.PublicKey
+		keyName = result.Name
+	} else {
+		if publicKeyProvided {
+			publicKey, err = sshkeys.ValidatePublicKey(publicKeyInput)
 			if err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-				printCommonSSHKeyPaths(cmd)
 				return
 			}
 		} else {
 			keyPath = args[0]
-		}
+			keyPath, err = sshkeys.ExpandHomePath(keyPath)
+			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+				return
+			}
+			if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error: SSH key file not found: %s\n", keyPath)
+				printCommonSSHKeyPaths(cmd)
+				return
+			}
 
-		keyPath, err = expandHomePath(keyPath)
-		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-			return
-		}
+			fmt.Fprintf(cmd.ErrOrStderr(), "Reading key from %s\n", keyPath)
 
-		// Check if file exists
-		if _, err := os.Stat(keyPath); os.IsNotExist(err) {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: SSH key file not found: %s\n", keyPath)
-			printCommonSSHKeyPaths(cmd)
-			return
-		}
-
-		fmt.Fprintf(cmd.ErrOrStderr(), "Reading key from %s\n", keyPath)
-
-		// Read and validate the SSH key
-		publicKey, err = readAndValidateSSHKey(keyPath)
-		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-			return
-		}
-	}
-
-	// Get or prompt for name
-	keyName, _ := cmd.Flags().GetString("name")
-	if keyName == "" {
-		suggestedName := defaultKeyName()
-		if keyPath != "" {
-			suggestedName = suggestKeyName(keyPath)
-		}
-		accessible := os.Getenv("ACCESSIBLE") != ""
-
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewInput().
-					Title("Enter a name for this SSH key").
-					Value(&keyName).
-					Placeholder(suggestedName).
-					Validate(func(s string) error {
-						if strings.TrimSpace(s) == "" {
-							return fmt.Errorf("name cannot be empty")
-						}
-						return nil
-					}),
-			),
-		).WithAccessible(accessible)
-
-		if err := form.Run(); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-			return
+			publicKey, err = sshkeys.ReadAndValidatePublicKey(keyPath)
+			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+				return
+			}
 		}
 	}
 
@@ -173,121 +164,6 @@ func runAdd(cmd *cobra.Command, args []string) {
 	printKeyDetails(cmd, keySpec)
 }
 
-func defaultSSHKeyPath() string {
-	return "~/.ssh/id_ed25519.pub"
-}
-
-func expandHomePath(path string) (string, error) {
-	if strings.HasPrefix(path, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("failed to determine home directory: %w", err)
-		}
-		return filepath.Join(home, path[2:]), nil
-	}
-
-	return path, nil
-}
-
-func promptForSSHKeyPath(cmd *cobra.Command, defaultPath string) (string, error) {
-	keyPath := defaultPath
-	accessible := os.Getenv("ACCESSIBLE") != ""
-
-	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Enter path to SSH public key").
-				Value(&keyPath).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
-						return fmt.Errorf("path cannot be empty")
-					}
-					return nil
-				}),
-		),
-	).WithAccessible(accessible)
-
-	if err := form.Run(); err != nil {
-		return "", err
-	}
-
-	keyPath = strings.TrimSpace(keyPath)
-	if keyPath == "" {
-		return "", fmt.Errorf("no SSH key path provided")
-	}
-
-	return keyPath, nil
-}
-
-func readAndValidateSSHKey(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("failed to read SSH key file: %w", err)
-	}
-
-	publicKey := strings.TrimSpace(string(data))
-	if publicKey == "" {
-		return "", fmt.Errorf("SSH key file is empty")
-	}
-
-	return validateSSHKey(publicKey)
-}
-
-func validateSSHKey(publicKey string) (string, error) {
-	publicKey = strings.TrimSpace(publicKey)
-	if publicKey == "" {
-		return "", fmt.Errorf("SSH key cannot be empty")
-	}
-
-	// Basic validation: check that it looks like a public key
-	if strings.Contains(publicKey, "PRIVATE KEY") {
-		return "", fmt.Errorf("file appears to contain a private key; please provide the public key (.pub file)")
-	}
-
-	// Check for common public key prefixes
-	validPrefixes := []string{"ssh-rsa", "ssh-ed25519", "ssh-dss", "ecdsa-sha2-"}
-	isValid := false
-	for _, prefix := range validPrefixes {
-		if strings.HasPrefix(publicKey, prefix) {
-			isValid = true
-			break
-		}
-	}
-
-	if !isValid {
-		return "", fmt.Errorf("file does not appear to be a valid SSH public key (expected ssh-rsa, ssh-ed25519, or ecdsa-sha2-*)")
-	}
-
-	return publicKey, nil
-}
-
-func defaultKeyName() string {
-	if hostname, err := os.Hostname(); err == nil {
-		name := strings.TrimSpace(hostname)
-		if name != "" {
-			return name
-		}
-	}
-
-	return "ssh-key"
-}
-
-func suggestKeyName(path string) string {
-	// Extract filename without extension
-	base := filepath.Base(path)
-	name := strings.TrimSuffix(base, filepath.Ext(base))
-
-	// Common substitutions
-	if name == "id_ed25519" || name == "id_rsa" || name == "id_ecdsa" {
-		// Try to get a more meaningful name from hostname
-		if hostname, err := os.Hostname(); err == nil {
-			return hostname
-		}
-	}
-
-	return name
-}
-
 func printKeyDetails(cmd *cobra.Command, key *domain.SSHKeySpec) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 	defer w.Flush()
@@ -300,7 +176,7 @@ func printKeyDetails(cmd *cobra.Command, key *domain.SSHKeySpec) {
 
 func printCommonSSHKeyPaths(cmd *cobra.Command) {
 	fmt.Fprintln(cmd.ErrOrStderr(), "\nCommon SSH key paths:")
-	fmt.Fprintln(cmd.ErrOrStderr(), "  ~/.ssh/id_ed25519.pub")
-	fmt.Fprintln(cmd.ErrOrStderr(), "  ~/.ssh/id_rsa.pub")
-	fmt.Fprintln(cmd.ErrOrStderr(), "  ~/.ssh/id_ecdsa.pub")
+	for _, path := range sshkeys.CommonPaths() {
+		fmt.Fprintf(cmd.ErrOrStderr(), "  %s\n", path)
+	}
 }

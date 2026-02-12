@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 
@@ -10,8 +9,8 @@ import (
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 	"nathanbeddoewebdev/vpsm/internal/tui"
 
-	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func DeleteCommand() *cobra.Command {
@@ -22,7 +21,7 @@ func DeleteCommand() *cobra.Command {
 
 If --id is not provided, an interactive TUI will let you select a server
 from the current list. The TUI shows a summary and asks for confirmation
-before deleting.
+before deleting. Requires a terminal; use --id for scripting.
 
 Examples:
   # Interactive mode (TUI)
@@ -48,59 +47,35 @@ func runDelete(cmd *cobra.Command, args []string) {
 	}
 
 	serverID, _ := cmd.Flags().GetString("id")
-	serverName := ""
-	useInteractive := serverID == ""
 
-	if useInteractive {
-		selected, err := tui.DeleteServerForm(provider)
+	if serverID == "" {
+		// Interactive mode requires a terminal.
+		if !term.IsTerminal(int(os.Stdout.Fd())) {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Error: --id is required when not running in a terminal")
+			return
+		}
+
+		result, err := tui.RunServerDelete(provider, providerName, nil)
 		if err != nil {
-			if errors.Is(err, tui.ErrDeleteAborted) {
-				fmt.Fprintln(cmd.ErrOrStderr(), "Server deletion cancelled.")
-				return
-			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 			return
 		}
-		serverID = selected.ID
-		serverName = selected.Name
-	}
+		if result == nil || !result.Confirmed {
+			fmt.Fprintln(cmd.ErrOrStderr(), "Server deletion cancelled.")
+			return
+		}
 
-	if serverName != "" {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Deleting server %q (ID: %s)...\n", serverName, serverID)
+		serverID = result.Server.ID
+		fmt.Fprintf(cmd.ErrOrStderr(), "Deleting server %q (ID: %s)...\n", result.Server.Name, serverID)
 	} else {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Deleting server %s...\n", serverID)
 	}
 
 	ctx := context.Background()
-
-	if useInteractive {
-		accessible := os.Getenv("ACCESSIBLE") != ""
-		var deleteErr error
-		spinErr := spinner.New().
-			Title("Deleting server...").
-			Accessible(accessible).
-			Output(cmd.ErrOrStderr()).
-			Action(func() {
-				deleteErr = provider.DeleteServer(ctx, serverID)
-			}).
-			Run()
-		if spinErr != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", spinErr)
-			return
-		}
-		err = deleteErr
-	} else {
-		err = provider.DeleteServer(ctx, serverID)
-	}
-
-	if err != nil {
+	if err := provider.DeleteServer(ctx, serverID); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error deleting server: %v\n", err)
 		return
 	}
 
-	if serverName != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "Server %q (ID: %s) deleted successfully.\n", serverName, serverID)
-	} else {
-		fmt.Fprintf(cmd.OutOrStdout(), "Server %s deleted successfully.\n", serverID)
-	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Server %s deleted successfully.\n", serverID)
 }

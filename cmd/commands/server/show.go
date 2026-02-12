@@ -2,17 +2,15 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 
-	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 	"nathanbeddoewebdev/vpsm/internal/tui"
 
-	"github.com/charmbracelet/huh/spinner"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // ShowCommand returns a cobra.Command that displays details for a single server.
@@ -22,8 +20,8 @@ func ShowCommand() *cobra.Command {
 		Short: "Show details for a server",
 		Long: `Display detailed information about a single server.
 
-If --id is not provided, an interactive TUI will let you select a server
-from the current list.
+If --id is not provided, this behaves like vpsm server list: an interactive
+TUI in a terminal, or table/json output in non-interactive mode.
 
 Examples:
   # Interactive mode (TUI)
@@ -53,47 +51,45 @@ func runShow(cmd *cobra.Command, args []string) {
 	}
 
 	serverID, _ := cmd.Flags().GetString("id")
-	useInteractive := serverID == ""
 
-	var server *domain.Server
-
-	if useInteractive {
-		selected, err := tui.ShowServerForm(provider)
-		if err != nil {
-			if errors.Is(err, tui.ErrShowAborted) {
-				fmt.Fprintln(cmd.ErrOrStderr(), "Server selection cancelled.")
-				return
+	if serverID == "" {
+		output, _ := cmd.Flags().GetString("output")
+		outputChanged := cmd.Flags().Changed("output")
+		if outputChanged || !term.IsTerminal(int(os.Stdout.Fd())) {
+			if output == "" {
+				output = "table"
 			}
+			runListNonInteractive(cmd, provider, output)
+			return
+		}
+
+		selected, action, err := tui.RunServerList(provider, providerName)
+		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 			return
 		}
 
-		// Fetch the full server details via GetServer for the freshest data.
-		accessible := os.Getenv("ACCESSIBLE") != ""
-		var getErr error
-		spinErr := spinner.New().
-			Title("Fetching server details...").
-			Accessible(accessible).
-			Output(cmd.ErrOrStderr()).
-			Action(func() {
-				server, getErr = provider.GetServer(context.Background(), selected.ID)
-			}).
-			Run()
-		if spinErr != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", spinErr)
-			return
+		switch action {
+		case "show":
+			if selected != nil {
+				runShowFromList(cmd, provider, providerName, selected)
+			}
+		case "delete":
+			if selected != nil {
+				runDeleteFromList(cmd, provider, providerName, selected)
+			}
+		case "create":
+			runCreateFromList(cmd, provider, providerName)
 		}
-		if getErr != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error fetching server: %v\n", getErr)
-			return
-		}
-	} else {
-		ctx := context.Background()
-		server, err = provider.GetServer(ctx, serverID)
-		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error fetching server: %v\n", err)
-			return
-		}
+		return
+	}
+
+	// Non-interactive mode: fetch and display directly.
+	ctx := context.Background()
+	server, err := provider.GetServer(ctx, serverID)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error fetching server: %v\n", err)
+		return
 	}
 
 	output, _ := cmd.Flags().GetString("output")

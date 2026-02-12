@@ -3,9 +3,13 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
+	"nathanbeddoewebdev/vpsm/internal/tui"
+
+	"golang.org/x/term"
 
 	"github.com/spf13/cobra"
 )
@@ -20,6 +24,16 @@ Example:
   vpsm auth status`,
 		Run: func(cmd *cobra.Command, args []string) {
 			store := auth.DefaultStore()
+
+			// Use TUI in interactive terminal.
+			if term.IsTerminal(int(os.Stdout.Fd())) {
+				if err := tui.RunAuthStatus(store); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+				}
+				return
+			}
+
+			// Non-interactive fallback.
 			providerNames := providers.List()
 
 			if len(providerNames) == 0 {
@@ -31,7 +45,7 @@ Example:
 				_, err := store.GetToken(provider)
 				switch {
 				case err == nil:
-					fmt.Fprintf(cmd.OutOrStdout(), "%s: logged in ✅\n", provider)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s: logged in\n", provider)
 				case errors.Is(err, auth.ErrTokenNotFound):
 					fmt.Fprintf(cmd.OutOrStdout(), "%s: not logged in\n", provider)
 				default:

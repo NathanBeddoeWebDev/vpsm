@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
-
-	"golang.org/x/term"
+	"nathanbeddoewebdev/vpsm/internal/tui"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 func LoginCommand() *cobra.Command {
@@ -35,15 +35,26 @@ Example:
 			}
 
 			token = strings.TrimSpace(token)
+			store := auth.DefaultStore()
+
 			if token == "" {
-				fmt.Fprint(cmd.OutOrStdout(), "Enter API token: ")
-				bytes, err := term.ReadPassword(int(os.Stdin.Fd()))
-				fmt.Fprintln(cmd.OutOrStdout())
-				if err != nil {
-					fmt.Fprintln(cmd.ErrOrStderr(), err)
+				// Interactive mode: use TUI if running in a terminal.
+				if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+					result, err := tui.RunAuthLogin(provider, store)
+					if err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+						return
+					}
+					if result != nil && result.Saved {
+						fmt.Fprintf(cmd.OutOrStdout(), "Saved token for provider %s\n", provider)
+					} else {
+						fmt.Fprintln(cmd.ErrOrStderr(), "Login cancelled.")
+					}
 					return
 				}
-				token = strings.TrimSpace(string(bytes))
+
+				fmt.Fprintln(cmd.ErrOrStderr(), "Error: non-interactive login requires --token")
+				return
 			}
 
 			if token == "" {
@@ -51,7 +62,6 @@ Example:
 				return
 			}
 
-			store := auth.DefaultStore()
 			if err := store.SetToken(provider, token); err != nil {
 				fmt.Fprintln(cmd.ErrOrStderr(), err)
 				return

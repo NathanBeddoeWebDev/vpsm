@@ -17,6 +17,13 @@ func printServerJSON(cmd *cobra.Command, server *domain.Server) {
 	enc.Encode(server)
 }
 
+// printServersJSON encodes a slice of servers as indented JSON to stdout.
+func printServersJSON(cmd *cobra.Command, servers []domain.Server) {
+	enc := json.NewEncoder(cmd.OutOrStdout())
+	enc.SetIndent("", "  ")
+	enc.Encode(servers)
+}
+
 // printServerDetail prints a vertical key-value table of all server fields.
 func printServerDetail(cmd *cobra.Command, server *domain.Server) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)

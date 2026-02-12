@@ -12,6 +12,7 @@ import (
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
+	"nathanbeddoewebdev/vpsm/internal/sshkeys"
 )
 
 // sshKeyMockProvider implements domain.Provider and domain.SSHKeyManager for testing.
@@ -329,21 +330,21 @@ func TestSuggestKeyName(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		got := suggestKeyName(tc.path)
+		got := sshkeys.SuggestKeyName(tc.path)
 		if tc.wantPattern == "hostname" {
 			// For common keys, expect hostname (non-empty and not the original name)
 			if got == "" {
-				t.Errorf("suggestKeyName(%q) = empty string, expected hostname", tc.path)
+				t.Errorf("SuggestKeyName(%q) = empty string, expected hostname", tc.path)
 			}
 			base := filepath.Base(tc.path)
 			baseName := strings.TrimSuffix(base, filepath.Ext(base))
 			if got == baseName {
-				t.Errorf("suggestKeyName(%q) = %q, expected hostname fallback not base name", tc.path, got)
+				t.Errorf("SuggestKeyName(%q) = %q, expected hostname fallback not base name", tc.path, got)
 			}
 		} else {
 			// For custom keys, expect the exact name
 			if got != tc.wantPattern {
-				t.Errorf("suggestKeyName(%q) = %q, expected %q", tc.path, got, tc.wantPattern)
+				t.Errorf("SuggestKeyName(%q) = %q, expected %q", tc.path, got, tc.wantPattern)
 			}
 		}
 	}
