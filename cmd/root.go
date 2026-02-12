@@ -4,6 +4,7 @@ Copyright © 2026 NAME HERE <EMAIL ADDRESS>
 package cmd
 
 import (
+	"nathanbeddoewebdev/vpsm/cmd/commands/auth"
 	"nathanbeddoewebdev/vpsm/cmd/commands/server"
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"os"
@@ -28,6 +29,7 @@ to quickly create a Cobra application.`,
 		// },
 	}
 
+	cmd.AddCommand(auth.NewCommand())
 	cmd.AddCommand(server.NewCommand())
 
 	return cmd
