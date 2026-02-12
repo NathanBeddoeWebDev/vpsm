@@ -6,6 +6,7 @@ import (
 	"nathanbeddoewebdev/vpsm/cmd/commands/auth"
 	cfgcmd "nathanbeddoewebdev/vpsm/cmd/commands/config"
 	"nathanbeddoewebdev/vpsm/cmd/commands/server"
+	"nathanbeddoewebdev/vpsm/cmd/commands/sshkey"
 	"nathanbeddoewebdev/vpsm/internal/providers"
 
 	"github.com/spf13/cobra"
@@ -32,6 +33,7 @@ Quick start:
 	cmd.AddCommand(auth.NewCommand())
 	cmd.AddCommand(cfgcmd.NewCommand())
 	cmd.AddCommand(server.NewCommand())
+	cmd.AddCommand(sshkey.NewCommand())
 
 	return cmd
 }

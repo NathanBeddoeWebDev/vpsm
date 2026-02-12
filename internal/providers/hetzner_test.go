@@ -12,6 +12,7 @@ import (
 
 	"nathanbeddoewebdev/vpsm/internal/cache"
 	"nathanbeddoewebdev/vpsm/internal/domain"
+	"nathanbeddoewebdev/vpsm/internal/retry"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 
 	"github.com/google/go-cmp/cmp"
@@ -29,6 +30,7 @@ func newTestHetznerProvider(t *testing.T, serverURL string, token string) *Hetzn
 		hcloud.WithToken(token),
 	)
 	provider.cache = cache.New(t.TempDir())
+	provider.retryConfig = retry.Config{MaxAttempts: 3}
 	return provider
 }
 

@@ -26,7 +26,7 @@ func (h *HetznerProvider) ListLocations(ctx context.Context) ([]domain.Location,
 	}
 
 	var hzLocations []*hcloud.Location
-	err := retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+	err := retry.Do(ctx, h.retryConfig, isHetznerRetryable, func() error {
 		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
 		var apiErr error
@@ -60,7 +60,7 @@ func (h *HetznerProvider) ListServerTypes(ctx context.Context) ([]domain.ServerT
 	}
 
 	var hzServerTypes []*hcloud.ServerType
-	err := retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+	err := retry.Do(ctx, h.retryConfig, isHetznerRetryable, func() error {
 		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
 		var apiErr error
@@ -94,7 +94,7 @@ func (h *HetznerProvider) ListImages(ctx context.Context) ([]domain.ImageSpec, e
 	}
 
 	var hzImages []*hcloud.Image
-	err := retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+	err := retry.Do(ctx, h.retryConfig, isHetznerRetryable, func() error {
 		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
 		var apiErr error
@@ -122,7 +122,7 @@ func (h *HetznerProvider) ListImages(ctx context.Context) ([]domain.ImageSpec, e
 // ListSSHKeys retrieves all SSH keys from the Hetzner Cloud API.
 func (h *HetznerProvider) ListSSHKeys(ctx context.Context) ([]domain.SSHKeySpec, error) {
 	var hzKeys []*hcloud.SSHKey
-	err := retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+	err := retry.Do(ctx, h.retryConfig, isHetznerRetryable, func() error {
 		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
 		var apiErr error
@@ -139,6 +139,38 @@ func (h *HetznerProvider) ListSSHKeys(ctx context.Context) ([]domain.SSHKeySpec,
 	}
 
 	return keys, nil
+}
+
+// --- SSHKeyManager implementation ---
+
+// CreateSSHKey uploads a new SSH key to the Hetzner Cloud API.
+func (h *HetznerProvider) CreateSSHKey(ctx context.Context, name, publicKey string) (*domain.SSHKeySpec, error) {
+	var hzKey *hcloud.SSHKey
+	err := retry.Do(ctx, h.retryConfig, isHetznerRetryable, func() error {
+		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+		var apiErr error
+		hzKey, _, apiErr = h.client.SSHKey.Create(reqCtx, hcloud.SSHKeyCreateOpts{
+			Name:      name,
+			PublicKey: publicKey,
+		})
+		return apiErr
+	})
+	if err != nil {
+		if hcloud.IsError(err, hcloud.ErrorCodeUnauthorized) {
+			return nil, fmt.Errorf("failed to create SSH key: %w", domain.ErrUnauthorized)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeRateLimitExceeded) {
+			return nil, fmt.Errorf("failed to create SSH key: %w", domain.ErrRateLimited)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeConflict) {
+			return nil, fmt.Errorf("failed to create SSH key: %w", domain.ErrConflict)
+		}
+		return nil, fmt.Errorf("failed to create SSH key: %w", err)
+	}
+
+	keySpec := toDomainSSHKey(hzKey)
+	return &keySpec, nil
 }
 
 // --- Domain mapping helpers ---
