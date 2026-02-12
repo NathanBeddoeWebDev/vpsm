@@ -17,11 +17,13 @@ import (
 // Compile-time check that HetznerProvider satisfies CatalogProvider
 // (which embeds Provider).
 var _ domain.CatalogProvider = (*HetznerProvider)(nil)
+var _ domain.SSHKeyManager = (*HetznerProvider)(nil)
 
 // HetznerProvider implements domain.Provider using the Hetzner Cloud API.
 type HetznerProvider struct {
-	client *hcloud.Client
-	cache  *cache.Cache
+	client      *hcloud.Client
+	cache       *cache.Cache
+	retryConfig retry.Config
 }
 
 const (
@@ -37,8 +39,9 @@ func NewHetznerProvider(opts ...hcloud.ClientOption) *HetznerProvider {
 	}
 	allOpts := append(defaults, opts...)
 	return &HetznerProvider{
-		client: hcloud.NewClient(allOpts...),
-		cache:  cache.NewDefault(),
+		client:      hcloud.NewClient(allOpts...),
+		cache:       cache.NewDefault(),
+		retryConfig: retry.DefaultConfig(),
 	}
 }
 
@@ -66,7 +69,7 @@ func (h *HetznerProvider) DeleteServer(ctx context.Context, id string) error {
 		return fmt.Errorf("invalid server ID %q: %w", id, err)
 	}
 
-	err = retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+	err = retry.Do(ctx, h.retryConfig, isHetznerRetryable, func() error {
 		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
 		_, _, err := h.client.Server.DeleteWithResult(reqCtx, &hcloud.Server{ID: numericID})
@@ -96,7 +99,7 @@ func (h *HetznerProvider) GetServer(ctx context.Context, id string) (*domain.Ser
 	}
 
 	var hzServer *hcloud.Server
-	err = retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+	err = retry.Do(ctx, h.retryConfig, isHetznerRetryable, func() error {
 		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
 		var apiErr error
@@ -124,7 +127,7 @@ func (h *HetznerProvider) GetServer(ctx context.Context, id string) (*domain.Ser
 // ListServers retrieves all servers from the Hetzner Cloud API.
 func (h *HetznerProvider) ListServers(ctx context.Context) ([]domain.Server, error) {
 	var hzServers []*hcloud.Server
-	err := retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+	err := retry.Do(ctx, h.retryConfig, isHetznerRetryable, func() error {
 		reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
 		var apiErr error
@@ -203,7 +206,6 @@ func isHetznerRetryable(err error) bool {
 		hcloud.ErrorCodeServerError,
 		hcloud.ErrorCodeTimeout,
 		hcloud.ErrorCodeUnknownError,
-		hcloud.ErrorCodeConflict,
 		hcloud.ErrorCodeResourceUnavailable,
 		hcloud.ErrorCodeMaintenance,
 		hcloud.ErrorCodeRobotUnavailable,
