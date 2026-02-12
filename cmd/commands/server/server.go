@@ -26,6 +26,7 @@ to quickly create a Cobra application.`,
 
 	cmd.AddCommand(CreateCommand())
 	cmd.AddCommand(DeleteCommand())
+	cmd.AddCommand(ListCommand())
 
 	return cmd
 }

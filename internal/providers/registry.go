@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-type Factory func() domain.Provider
+type Factory func() (domain.Provider, error)
 
 var (
 	mu       sync.RWMutex
@@ -46,7 +46,12 @@ func Get(name string) (domain.Provider, error) {
 		return nil, fmt.Errorf("providers: unknown provider %q", name)
 	}
 
-	return factory(), nil
+	provider, err := factory()
+	if err != nil {
+		return nil, err
+	}
+
+	return provider, nil
 }
 
 func List() []string {

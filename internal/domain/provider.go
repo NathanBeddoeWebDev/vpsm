@@ -5,4 +5,5 @@ type Provider interface {
 	Authenticate() error
 	CreateServer(name string, region string, size string) (*Server, error)
 	DeleteServer(id string) error
+	ListServers() ([]Server, error)
 }
