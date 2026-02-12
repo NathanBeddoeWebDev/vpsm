@@ -17,7 +17,7 @@ import (
 // GetCommand returns the "config get" command.
 func GetCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "get [key]",
+		Use:   "get",
 		Short: "Get a configuration value",
 		Long: "Get a persistent configuration value.\n\n" +
 			"If no key is provided and running in a terminal, opens an interactive\n" +
@@ -25,17 +25,22 @@ func GetCommand() *cobra.Command {
 			config.KeysHelp() +
 			"\nExamples:\n" +
 			"  vpsm config get                   # interactive viewer\n" +
-			"  vpsm config get default-provider   # print a single value",
-		Args: cobra.MaximumNArgs(1),
+			"  vpsm config get --key default-provider   # print a single value",
+		Args: cobra.ExactArgs(0),
 		Run:  runGet,
 	}
+
+	cmd.Flags().String("key", "", "Configuration key to fetch (prints a single value)")
 
 	return cmd
 }
 
 func runGet(cmd *cobra.Command, args []string) {
-	// No args: open interactive config viewer.
-	if len(args) == 0 {
+	keyFlag, _ := cmd.Flags().GetString("key")
+	keyFlag = strings.TrimSpace(keyFlag)
+
+	// No key flag: open interactive config viewer.
+	if keyFlag == "" {
 		if term.IsTerminal(int(os.Stdout.Fd())) {
 			if err := tui.RunConfigView(); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
@@ -59,11 +64,11 @@ func runGet(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	key := util.NormalizeKey(args[0])
+	key := util.NormalizeKey(keyFlag)
 
 	spec := config.Lookup(key)
 	if spec == nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: unknown configuration key %q\n", args[0])
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error: unknown configuration key %q\n", keyFlag)
 		fmt.Fprintf(cmd.ErrOrStderr(), "Valid keys: %s\n", strings.Join(config.KeyNames(), ", "))
 		return
 	}
