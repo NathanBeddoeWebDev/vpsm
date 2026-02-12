@@ -8,18 +8,21 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 )
 
-// newTestHetznerProvider creates a HetznerProvider pointed at the given base URL.
-func newTestHetznerProvider(baseURL string, token string) *HetznerProvider {
-	return &HetznerProvider{
-		client:  &http.Client{Timeout: 5 * time.Second},
-		baseURL: baseURL,
-		token:   token,
-	}
+// --- Test helpers ---
+
+// newTestHetznerProvider creates a HetznerProvider whose SDK client
+// is pointed at the given httptest server URL.
+func newTestHetznerProvider(serverURL string, token string) *HetznerProvider {
+	return NewHetznerProvider(
+		hcloud.WithEndpoint(serverURL),
+		hcloud.WithToken(token),
+	)
 }
 
 // newTestAPI spins up an httptest.Server that returns the given response as JSON.
@@ -36,40 +39,104 @@ func newTestAPI(t *testing.T, response interface{}) *httptest.Server {
 	return srv
 }
 
-func TestListServers_HappyPath(t *testing.T) {
-	created := time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC)
+// --- JSON builder helpers for Hetzner API-shaped responses ---
 
-	response := hetznerListServersResponse{
-		Servers: []hetznerServer{
-			{
-				ID:         42,
-				Name:       "web-server",
-				Status:     "running",
-				Created:    created,
-				ServerType: hetznerServerType{Name: "cpx11", Architecture: "x86"},
-				Image:      &hetznerImage{Name: "ubuntu-24.04"},
-				Location:   hetznerLocation{Name: "fsn1"},
-				Datacenter: hetznerLocation{Name: "fsn1-dc14"},
-				PublicNet: hetznerPublicNet{
-					IPv4: &hetznerIPAddress{IP: "1.2.3.4"},
-					IPv6: &hetznerIPAddress{IP: "2001:db8::/64"},
-				},
-				PrivateNet: []hetznerIPAddress{{IP: "10.0.0.2"}},
-			},
-			{
-				ID:         99,
-				Name:       "db-server",
-				Status:     "stopped",
-				Created:    created,
-				ServerType: hetznerServerType{Name: "cpx22", Architecture: "arm"},
-				Image:      &hetznerImage{Name: "debian-12"},
-				Location:   hetznerLocation{Name: "nbg1"},
-				Datacenter: hetznerLocation{Name: "nbg1-dc3"},
-				PublicNet: hetznerPublicNet{
-					IPv4: &hetznerIPAddress{IP: "5.6.7.8"},
-				},
-			},
+// testLocationJSON builds a Hetzner API location object.
+func testLocationJSON(id int, name, country, city string) map[string]interface{} {
+	return map[string]interface{}{
+		"id": id, "name": name, "description": name,
+		"country": country, "city": city,
+		"latitude": 50.0, "longitude": 12.0,
+		"network_zone": "eu-central",
+	}
+}
+
+// testDatacenterJSON builds a Hetzner API datacenter object with a nested location.
+func testDatacenterJSON(id int, name string, location map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"id": id, "name": name, "description": name,
+		"location": location,
+	}
+}
+
+// testServerTypeJSON builds a Hetzner API server_type object.
+func testServerTypeJSON(id int, name, arch string) map[string]interface{} {
+	return map[string]interface{}{
+		"id": id, "name": name, "description": name,
+		"cores": 2, "memory": 2.0, "disk": 40,
+		"architecture": arch,
+		"storage_type": "local",
+		"cpu_type":     "shared",
+		"prices":       []interface{}{},
+	}
+}
+
+// testImageJSON builds a Hetzner API image object.
+func testImageJSON(id int, name, osFlavor, osVersion, arch string) map[string]interface{} {
+	return map[string]interface{}{
+		"id": id, "name": name, "description": name,
+		"type": "system", "status": "available",
+		"os_flavor": osFlavor, "os_version": osVersion,
+		"architecture": arch,
+	}
+}
+
+// testServerJSON builds a minimal Hetzner API server object with sensible defaults.
+// The returned map can be modified before being used in a response.
+func testServerJSON(id int, name, status, created string, loc map[string]interface{}, dc map[string]interface{}, st map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"id":      id,
+		"name":    name,
+		"status":  status,
+		"created": created,
+		"public_net": map[string]interface{}{
+			"floating_ips": []interface{}{},
+			"firewalls":    []interface{}{},
 		},
+		"private_net":    []interface{}{},
+		"server_type":    st,
+		"image":          nil,
+		"location":       loc,
+		"datacenter":     dc,
+		"labels":         map[string]interface{}{},
+		"volumes":        []interface{}{},
+		"load_balancers": []interface{}{},
+	}
+}
+
+// --- ListServers tests ---
+
+func TestListServers_HappyPath(t *testing.T) {
+	const createdStr = "2024-06-15T12:00:00+00:00"
+	// Parse the expected time identically to how the SDK will parse it from JSON,
+	// avoiding any timezone representation mismatches with time.Date().
+	created, _ := time.Parse(time.RFC3339, createdStr)
+
+	fsn1 := testLocationJSON(1, "fsn1", "DE", "Falkenstein")
+	nbg1 := testLocationJSON(2, "nbg1", "DE", "Nuremberg")
+
+	server1 := testServerJSON(42, "web-server", "running", createdStr, fsn1, testDatacenterJSON(1, "fsn1-dc14", fsn1), testServerTypeJSON(1, "cpx11", "x86"))
+	server1["public_net"] = map[string]interface{}{
+		"ipv4":         map[string]interface{}{"ip": "1.2.3.4", "blocked": false},
+		"ipv6":         map[string]interface{}{"ip": "2001:db8::/64", "blocked": false},
+		"floating_ips": []interface{}{},
+		"firewalls":    []interface{}{},
+	}
+	server1["private_net"] = []interface{}{
+		map[string]interface{}{"ip": "10.0.0.2", "alias_ips": []interface{}{}, "network": 1, "mac_address": ""},
+	}
+	server1["image"] = testImageJSON(1, "ubuntu-24.04", "ubuntu", "24.04", "x86")
+
+	server2 := testServerJSON(99, "db-server", "stopped", createdStr, nbg1, testDatacenterJSON(2, "nbg1-dc3", nbg1), testServerTypeJSON(2, "cpx22", "arm"))
+	server2["public_net"] = map[string]interface{}{
+		"ipv4":         map[string]interface{}{"ip": "5.6.7.8", "blocked": false},
+		"floating_ips": []interface{}{},
+		"firewalls":    []interface{}{},
+	}
+	server2["image"] = testImageJSON(2, "debian-12", "debian", "12", "x86")
+
+	response := map[string]interface{}{
+		"servers": []interface{}{server1, server2},
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,9 +145,6 @@ func TestListServers_HappyPath(t *testing.T) {
 		}
 		if r.Header.Get("Authorization") != "Bearer test-token" {
 			t.Errorf("expected Authorization header 'Bearer test-token', got %q", r.Header.Get("Authorization"))
-		}
-		if r.Header.Get("Content-Type") != "application/json" {
-			t.Errorf("expected Content-Type 'application/json', got %q", r.Header.Get("Content-Type"))
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -104,7 +168,7 @@ func TestListServers_HappyPath(t *testing.T) {
 		Status:      "running",
 		CreatedAt:   created,
 		PublicIPv4:  "1.2.3.4",
-		PublicIPv6:  "2001:db8::/64",
+		PublicIPv6:  "2001:db8::",
 		PrivateIPv4: "10.0.0.2",
 		Region:      "fsn1",
 		ServerType:  "cpx11",
@@ -112,7 +176,6 @@ func TestListServers_HappyPath(t *testing.T) {
 		Provider:    "hetzner",
 		Metadata: map[string]interface{}{
 			"hetzner_id":   int64(42),
-			"datacenter":   "fsn1-dc14",
 			"architecture": "x86",
 		},
 	}
@@ -129,7 +192,6 @@ func TestListServers_HappyPath(t *testing.T) {
 		Provider:   "hetzner",
 		Metadata: map[string]interface{}{
 			"hetzner_id":   int64(99),
-			"datacenter":   "nbg1-dc3",
 			"architecture": "arm",
 		},
 	}
@@ -143,7 +205,9 @@ func TestListServers_HappyPath(t *testing.T) {
 }
 
 func TestListServers_EmptyList(t *testing.T) {
-	srv := newTestAPI(t, hetznerListServersResponse{Servers: []hetznerServer{}})
+	srv := newTestAPI(t, map[string]interface{}{
+		"servers": []interface{}{},
+	})
 
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 	servers, err := provider.ListServers()
@@ -156,22 +220,15 @@ func TestListServers_EmptyList(t *testing.T) {
 }
 
 func TestListServers_NilOptionalFields(t *testing.T) {
-	response := hetznerListServersResponse{
-		Servers: []hetznerServer{
-			{
-				ID:         1,
-				Name:       "bare-server",
-				Status:     "running",
-				ServerType: hetznerServerType{Name: "cx11", Architecture: "x86"},
-				Image:      nil,
-				Location:   hetznerLocation{Name: "hel1"},
-				Datacenter: hetznerLocation{Name: "hel1-dc2"},
-				// PublicNet and PrivateNet left as zero values
-			},
-		},
-	}
+	loc := testLocationJSON(3, "hel1", "FI", "Helsinki")
 
-	srv := newTestAPI(t, response)
+	server := testServerJSON(1, "bare-server", "running", "2024-06-15T12:00:00+00:00", loc, testDatacenterJSON(3, "hel1-dc2", loc), testServerTypeJSON(1, "cx11", "x86"))
+	// image is already nil from testServerJSON
+	// public_net has no ipv4/ipv6 entries, private_net is empty
+
+	srv := newTestAPI(t, map[string]interface{}{
+		"servers": []interface{}{server},
+	})
 
 	provider := newTestHetznerProvider(srv.URL, "test-token")
 	servers, err := provider.ListServers()
@@ -199,7 +256,14 @@ func TestListServers_NilOptionalFields(t *testing.T) {
 
 func TestListServers_Non200StatusCode(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]interface{}{
+				"code":    "unauthorized",
+				"message": "unable to authenticate",
+			},
+		})
 	}))
 	t.Cleanup(srv.Close)
 
@@ -225,23 +289,20 @@ func TestListServers_MalformedJSON(t *testing.T) {
 }
 
 func TestListServers_FactoryViaRegistry(t *testing.T) {
+	loc := testLocationJSON(4, "ash", "US", "Ashburn")
+
+	server := testServerJSON(7, "registry-server", "running", "2024-06-15T12:00:00+00:00", loc, testDatacenterJSON(4, "ash-dc1", loc), testServerTypeJSON(3, "cpx31", "x86"))
+
+	response := map[string]interface{}{
+		"servers": []interface{}{server},
+	}
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer registry-token" {
 			t.Errorf("expected Authorization 'Bearer registry-token', got %q", r.Header.Get("Authorization"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(hetznerListServersResponse{
-			Servers: []hetznerServer{
-				{
-					ID:         7,
-					Name:       "registry-server",
-					Status:     "running",
-					ServerType: hetznerServerType{Name: "cpx31", Architecture: "x86"},
-					Location:   hetznerLocation{Name: "ash"},
-					Datacenter: hetznerLocation{Name: "ash-dc1"},
-				},
-			},
-		})
+		json.NewEncoder(w).Encode(response)
 	}))
 	t.Cleanup(srv.Close)
 
@@ -253,11 +314,10 @@ func TestListServers_FactoryViaRegistry(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		return &HetznerProvider{
-			client:  &http.Client{Timeout: 5 * time.Second},
-			baseURL: srv.URL,
-			token:   token,
-		}, nil
+		return NewHetznerProvider(
+			hcloud.WithToken(token),
+			hcloud.WithEndpoint(srv.URL),
+		), nil
 	})
 
 	store := auth.NewMockStore()
@@ -292,11 +352,7 @@ func TestListServers_FactoryMissingToken(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		return &HetznerProvider{
-			client:  &http.Client{},
-			baseURL: "http://unused",
-			token:   token,
-		}, nil
+		return NewHetznerProvider(hcloud.WithToken(token)), nil
 	})
 
 	store := auth.NewMockStore() // no token set

@@ -20,7 +20,7 @@ type mockProvider struct {
 }
 
 func (m *mockProvider) GetDisplayName() string { return m.displayName }
-func (m *mockProvider) CreateServer(name, region, size string) (*domain.Server, error) {
+func (m *mockProvider) CreateServer(opts domain.CreateServerOpts) (*domain.Server, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 func (m *mockProvider) DeleteServer(id string) error {

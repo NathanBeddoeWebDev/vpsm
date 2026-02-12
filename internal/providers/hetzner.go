@@ -1,66 +1,34 @@
 package providers
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
+	"strconv"
+
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
-	"net/http"
-	"strconv"
-	"time"
+
+	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 )
 
-const hetznerHTTPTimeout = 30 * time.Second
-
-// create a struct which follows the Provider interface
-const hetznerBaseURL = "https://api.hetzner.cloud/v1"
-
-// Hetzner API response structures
-type hetznerListServersResponse struct {
-	Servers []hetznerServer `json:"servers"`
-}
-
-type hetznerIPAddress struct {
-	IP string `json:"ip"`
-}
-
-type hetznerServerType struct {
-	Name         string `json:"name"`
-	Architecture string `json:"architecture"`
-}
-
-type hetznerImage struct {
-	Name string `json:"name"`
-}
-
-type hetznerLocation struct {
-	Name string `json:"name"`
-}
-
-type hetznerPublicNet struct {
-	IPv4 *hetznerIPAddress `json:"ipv4"`
-	IPv6 *hetznerIPAddress `json:"ipv6"`
-}
-
-type hetznerServer struct {
-	ID         int64              `json:"id"`
-	Name       string             `json:"name"`
-	Status     string             `json:"status"`
-	Created    time.Time          `json:"created"`
-	PublicNet  hetznerPublicNet   `json:"public_net"`
-	PrivateNet []hetznerIPAddress `json:"private_net"`
-	ServerType hetznerServerType  `json:"server_type"`
-	Image      *hetznerImage      `json:"image"`
-	Location   hetznerLocation    `json:"location"`
-	Datacenter hetznerLocation    `json:"datacenter"`
-}
-
+// HetznerProvider implements domain.Provider using the Hetzner Cloud API.
 type HetznerProvider struct {
-	client  *http.Client
-	baseURL string
-	token   string
+	client *hcloud.Client
 }
 
+// NewHetznerProvider creates a HetznerProvider with the given hcloud client options.
+// Default options (application name) are applied first; callers can override them.
+func NewHetznerProvider(opts ...hcloud.ClientOption) *HetznerProvider {
+	defaults := []hcloud.ClientOption{
+		hcloud.WithApplication("vpsm", "0.1.0"),
+	}
+	allOpts := append(defaults, opts...)
+	return &HetznerProvider{
+		client: hcloud.NewClient(allOpts...),
+	}
+}
+
+// RegisterHetzner registers the Hetzner provider factory with the global registry.
 func RegisterHetzner() {
 	Register("hetzner", func(store auth.Store) (domain.Provider, error) {
 		token, err := store.GetToken("hetzner")
@@ -68,11 +36,7 @@ func RegisterHetzner() {
 			return nil, fmt.Errorf("hetzner auth: %w", err)
 		}
 
-		return &HetznerProvider{
-			client:  &http.Client{Timeout: hetznerHTTPTimeout},
-			baseURL: hetznerBaseURL,
-			token:   token,
-		}, nil
+		return NewHetznerProvider(hcloud.WithToken(token)), nil
 	})
 }
 
@@ -80,7 +44,7 @@ func (h *HetznerProvider) GetDisplayName() string {
 	return "Hetzner"
 }
 
-func (h *HetznerProvider) CreateServer(name string, region string, size string) (*domain.Server, error) {
+func (h *HetznerProvider) CreateServer(opts domain.CreateServerOpts) (*domain.Server, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
@@ -88,85 +52,61 @@ func (h *HetznerProvider) DeleteServer(id string) error {
 	return fmt.Errorf("not implemented")
 }
 
-// ListServers retrieves all servers from Hetzner Cloud API
+// ListServers retrieves all servers from the Hetzner Cloud API.
 func (h *HetznerProvider) ListServers() ([]domain.Server, error) {
-	req, err := h.newRequest(http.MethodGet, "/servers")
+	ctx := context.Background()
+
+	hzServers, err := h.client.Server.All(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to list servers: %w", err)
 	}
 
-	resp, err := h.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	var apiResp hetznerListServersResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	servers := make([]domain.Server, 0, len(apiResp.Servers))
-	for _, hzServer := range apiResp.Servers {
-		servers = append(servers, h.toDomainServer(hzServer))
+	servers := make([]domain.Server, 0, len(hzServers))
+	for _, s := range hzServers {
+		servers = append(servers, toDomainServer(s))
 	}
 
 	return servers, nil
 }
 
-// toDomainServer converts a Hetzner API server to domain.Server
-func (h *HetznerProvider) toDomainServer(hzServer hetznerServer) domain.Server {
+// toDomainServer converts an hcloud.Server to a domain.Server.
+func toDomainServer(s *hcloud.Server) domain.Server {
 	server := domain.Server{
-		ID:         strconv.FormatInt(hzServer.ID, 10),
-		Name:       hzServer.Name,
-		Status:     hzServer.Status,
-		CreatedAt:  hzServer.Created,
-		Region:     hzServer.Location.Name,
-		ServerType: hzServer.ServerType.Name,
-		Provider:   "hetzner",
-		Metadata:   make(map[string]interface{}),
+		ID:        strconv.FormatInt(s.ID, 10),
+		Name:      s.Name,
+		Status:    string(s.Status),
+		CreatedAt: s.Created,
+		Provider:  "hetzner",
+		Metadata:  make(map[string]interface{}),
 	}
 
-	// Extract public IPv4
-	if hzServer.PublicNet.IPv4 != nil {
-		server.PublicIPv4 = hzServer.PublicNet.IPv4.IP
+	if !s.PublicNet.IPv4.IsUnspecified() {
+		server.PublicIPv4 = s.PublicNet.IPv4.IP.String()
 	}
 
-	// Extract public IPv6
-	if hzServer.PublicNet.IPv6 != nil {
-		server.PublicIPv6 = hzServer.PublicNet.IPv6.IP
+	if !s.PublicNet.IPv6.IsUnspecified() {
+		server.PublicIPv6 = s.PublicNet.IPv6.IP.String()
 	}
 
-	// Extract first private IP if available
-	if len(hzServer.PrivateNet) > 0 {
-		server.PrivateIPv4 = hzServer.PrivateNet[0].IP
+	if len(s.PrivateNet) > 0 && s.PrivateNet[0].IP != nil {
+		server.PrivateIPv4 = s.PrivateNet[0].IP.String()
 	}
 
-	// Extract image name
-	if hzServer.Image != nil {
-		server.Image = hzServer.Image.Name
+	if s.ServerType != nil {
+		server.ServerType = s.ServerType.Name
+		server.Metadata["architecture"] = string(s.ServerType.Architecture)
+	}
+
+	if s.Image != nil {
+		server.Image = s.Image.Name
+	}
+
+	if s.Location != nil {
+		server.Region = s.Location.Name
 	}
 
 	// Store Hetzner-specific metadata
-	server.Metadata["hetzner_id"] = hzServer.ID
-	server.Metadata["datacenter"] = hzServer.Datacenter.Name
-	server.Metadata["architecture"] = hzServer.ServerType.Architecture
+	server.Metadata["hetzner_id"] = s.ID
 
 	return server
-}
-
-func (h *HetznerProvider) newRequest(method string, path string) (*http.Request, error) {
-	url := h.baseURL + path
-	req, err := http.NewRequest(method, url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+h.token)
-	req.Header.Set("Content-Type", "application/json")
-	return req, nil
 }
