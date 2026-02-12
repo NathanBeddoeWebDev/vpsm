@@ -31,7 +31,7 @@ func (h *HetznerProvider) CreateServer(ctx context.Context, opts domain.CreateSe
 	// each name-or-ID through the API before creating the server.
 	for _, key := range opts.SSHKeys {
 		var sshKey *hcloud.SSHKey
-		err := retry.Do(ctx, retry.DefaultConfig(), isHetznerRetryable, func() error {
+		err := retry.Do(ctx, h.retryConfig, isHetznerRetryable, func() error {
 			reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
 			defer cancel()
 			var apiErr error

@@ -1,5 +1,5 @@
 # VPSM
-A worse version of (HCloud)[https://hetzner.cloud] for now.
+A worse version of [HCloud](https://hetzner.cloud) for now.
 
 ## Usage
 ```

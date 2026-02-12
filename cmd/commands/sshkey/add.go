@@ -1,6 +1,7 @@
 package sshkey
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -60,31 +61,42 @@ func runAdd(cmd *cobra.Command, args []string) {
 	}
 
 	// Determine path
+	usingDefault := len(args) == 0
 	var keyPath string
-	if len(args) > 0 {
-		keyPath = args[0]
-	} else {
+	if usingDefault {
 		keyPath = defaultSSHKeyPath()
+	} else {
+		keyPath = args[0]
 	}
 
-	// Expand home directory if present
-	if strings.HasPrefix(keyPath, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: failed to determine home directory: %v\n", err)
-			return
-		}
-		keyPath = filepath.Join(home, keyPath[2:])
+	keyPath, err = expandHomePath(keyPath)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+		return
 	}
 
 	// Check if file exists
 	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: SSH key file not found: %s\n", keyPath)
-		fmt.Fprintln(cmd.ErrOrStderr(), "\nCommon SSH key paths:")
-		fmt.Fprintln(cmd.ErrOrStderr(), "  ~/.ssh/id_ed25519.pub")
-		fmt.Fprintln(cmd.ErrOrStderr(), "  ~/.ssh/id_rsa.pub")
-		fmt.Fprintln(cmd.ErrOrStderr(), "  ~/.ssh/id_ecdsa.pub")
-		return
+		if usingDefault {
+			keyPath, err = promptForSSHKeyPath(cmd, keyPath)
+			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+				printCommonSSHKeyPaths(cmd)
+				return
+			}
+
+			keyPath, err = expandHomePath(keyPath)
+			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
+				return
+			}
+		}
+
+		if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error: SSH key file not found: %s\n", keyPath)
+			printCommonSSHKeyPaths(cmd)
+			return
+		}
 	}
 
 	fmt.Fprintf(cmd.ErrOrStderr(), "Reading key from %s\n", keyPath)
@@ -144,6 +156,38 @@ func defaultSSHKeyPath() string {
 	return "~/.ssh/id_ed25519.pub"
 }
 
+func expandHomePath(path string) (string, error) {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("failed to determine home directory: %w", err)
+		}
+		return filepath.Join(home, path[2:]), nil
+	}
+
+	return path, nil
+}
+
+func promptForSSHKeyPath(cmd *cobra.Command, missingPath string) (string, error) {
+	fmt.Fprintf(cmd.ErrOrStderr(), "Default SSH key not found at %s\n", missingPath)
+	fmt.Fprint(cmd.ErrOrStderr(), "Enter path to SSH public key: ")
+
+	scanner := bufio.NewScanner(cmd.InOrStdin())
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return "", err
+		}
+		return "", fmt.Errorf("no SSH key path provided")
+	}
+
+	input := strings.TrimSpace(scanner.Text())
+	if input == "" {
+		return "", fmt.Errorf("no SSH key path provided")
+	}
+
+	return input, nil
+}
+
 func readAndValidateSSHKey(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -201,4 +245,11 @@ func printKeyDetails(cmd *cobra.Command, key *domain.SSHKeySpec) {
 	fmt.Fprintf(w, "  Name:\t%s\n", key.Name)
 	fmt.Fprintf(w, "  Fingerprint:\t%s\n", key.Fingerprint)
 	fmt.Fprintf(w, "  ID:\t%s\n", key.ID)
+}
+
+func printCommonSSHKeyPaths(cmd *cobra.Command) {
+	fmt.Fprintln(cmd.ErrOrStderr(), "\nCommon SSH key paths:")
+	fmt.Fprintln(cmd.ErrOrStderr(), "  ~/.ssh/id_ed25519.pub")
+	fmt.Fprintln(cmd.ErrOrStderr(), "  ~/.ssh/id_rsa.pub")
+	fmt.Fprintln(cmd.ErrOrStderr(), "  ~/.ssh/id_ecdsa.pub")
 }
