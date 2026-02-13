@@ -64,7 +64,7 @@ func CreateServerForm(provider domain.CatalogProvider, prefill domain.CreateServ
 	}
 
 	opts := prefill
-	opts.SSHKeys = append([]string(nil), prefill.SSHKeys...)
+	opts.SSHKeyIdentifiers = append([]string(nil), prefill.SSHKeyIdentifiers...)
 
 	// --- Form 1: Name + Location ---
 
@@ -126,7 +126,7 @@ func CreateServerForm(provider domain.CatalogProvider, prefill domain.CreateServ
 	}
 	_ = imageOptsFunc() // prime imageLabels for summary
 
-	sshKeyOpts, sshKeyLabels := buildSSHKeyOptions(data.sshKeys, opts.SSHKeys)
+	sshKeyOpts, sshKeyLabels := buildSSHKeyOptions(data.sshKeys, opts.SSHKeyIdentifiers)
 
 	// --- Form 2: Server Type + Image + SSH Keys + Confirm ---
 
@@ -156,7 +156,7 @@ func CreateServerForm(provider domain.CatalogProvider, prefill domain.CreateServ
 			huh.NewMultiSelect[string]().
 				Title("SSH keys").
 				Options(sshKeyOpts...).
-				Value(&opts.SSHKeys).
+				Value(&opts.SSHKeyIdentifiers).
 				Height(10),
 		)
 	}
@@ -188,8 +188,8 @@ func CreateServerForm(provider domain.CatalogProvider, prefill domain.CreateServ
 	}
 
 	opts.Name = strings.TrimSpace(opts.Name)
-	if len(opts.SSHKeys) == 0 {
-		opts.SSHKeys = nil
+	if len(opts.SSHKeyIdentifiers) == 0 {
+		opts.SSHKeyIdentifiers = nil
 	}
 
 	return &opts, nil
@@ -385,7 +385,7 @@ func buildSummary(opts domain.CreateServerOpts, locationLabels, serverTypeLabels
 	fmt.Fprintf(&b, "Location: %s\n", labelFor(locationLabels, opts.Location, "Auto (provider default)"))
 	fmt.Fprintf(&b, "Server type: %s\n", labelFor(serverTypeLabels, opts.ServerType, "Not selected"))
 	fmt.Fprintf(&b, "Image: %s\n", labelFor(imageLabels, opts.Image, "Not selected"))
-	fmt.Fprintf(&b, "SSH keys: %s\n", formatList(opts.SSHKeys, sshKeyLabels, "None"))
+	fmt.Fprintf(&b, "SSH keys: %s\n", formatList(opts.SSHKeyIdentifiers, sshKeyLabels, "None"))
 
 	if labels := formatLabels(opts.Labels); labels != "" {
 		fmt.Fprintf(&b, "Labels: %s\n", labels)

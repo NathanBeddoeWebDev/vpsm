@@ -10,11 +10,11 @@ type CreateServerOpts struct {
 	ServerType string // name or ID
 
 	// Common optional
-	Location         string
-	SSHKeys          []string // names or IDs
-	Labels           map[string]string
-	UserData         string
-	StartAfterCreate *bool // nil = provider default (usually true)
+	Location          string
+	SSHKeyIdentifiers []string // names or IDs
+	Labels            map[string]string
+	UserData          string
+	StartAfterCreate  *bool // nil = provider default (usually true)
 
 	// Provider-specific extensions (e.g. firewalls, networks, volumes).
 	// Keyed by provider-defined strings; see each provider for details.

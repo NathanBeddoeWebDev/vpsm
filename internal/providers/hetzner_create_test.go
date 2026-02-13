@@ -188,10 +188,10 @@ func TestCreateServer_WithSSHKeys(t *testing.T) {
 	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	server, err := provider.CreateServer(ctx, domain.CreateServerOpts{
-		Name:       "ssh-server",
-		Image:      "ubuntu-24.04",
-		ServerType: "cpx11",
-		SSHKeys:    []string{"my-key", "deploy-key"},
+		Name:              "ssh-server",
+		Image:             "ubuntu-24.04",
+		ServerType:        "cpx11",
+		SSHKeyIdentifiers: []string{"my-key", "deploy-key"},
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -257,10 +257,10 @@ func TestCreateServer_SSHKeyNotFound(t *testing.T) {
 	provider := newTestHetznerProvider(t, srv.URL, "test-token")
 
 	_, err := provider.CreateServer(ctx, domain.CreateServerOpts{
-		Name:       "fail-server",
-		Image:      "ubuntu-24.04",
-		ServerType: "cpx11",
-		SSHKeys:    []string{"nonexistent-key"},
+		Name:              "fail-server",
+		Image:             "ubuntu-24.04",
+		ServerType:        "cpx11",
+		SSHKeyIdentifiers: []string{"nonexistent-key"},
 	})
 	if err == nil {
 		t.Fatal("expected error for missing SSH key, got nil")

@@ -148,14 +148,14 @@ func TestBuildSSHKeyOptions_AddsCustom(t *testing.T) {
 func TestBuildSummary_IncludesOptionalFields(t *testing.T) {
 	start := true
 	opts := domain.CreateServerOpts{
-		Name:             "web-1",
-		Location:         "fsn1",
-		ServerType:       "cpx11",
-		Image:            "ubuntu-24.04",
-		SSHKeys:          []string{"key-1"},
-		Labels:           map[string]string{"env": "prod", "role": "web"},
-		UserData:         "#!/bin/bash\necho hello",
-		StartAfterCreate: &start,
+		Name:              "web-1",
+		Location:          "fsn1",
+		ServerType:        "cpx11",
+		Image:             "ubuntu-24.04",
+		SSHKeyIdentifiers: []string{"key-1"},
+		Labels:            map[string]string{"env": "prod", "role": "web"},
+		UserData:          "#!/bin/bash\necho hello",
+		StartAfterCreate:  &start,
 	}
 
 	summary := buildSummary(

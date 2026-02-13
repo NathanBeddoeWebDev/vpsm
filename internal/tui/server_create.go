@@ -255,7 +255,7 @@ func (m *serverCreateModel) buildCatalogItems() {
 
 	// Pre-select prefilled SSH keys.
 	for i, key := range m.sshKeys {
-		for _, prefillKey := range m.prefill.SSHKeys {
+		for _, prefillKey := range m.prefill.SSHKeyIdentifiers {
 			if strings.EqualFold(key.name, prefillKey) {
 				m.sshSelected[i] = struct{}{}
 			}
@@ -510,10 +510,10 @@ func (m serverCreateModel) handleSSHKeysKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		}
 	case "enter":
 		// Collect selected keys.
-		m.opts.SSHKeys = nil
+		m.opts.SSHKeyIdentifiers = nil
 		for i := range m.sshKeys {
 			if _, ok := m.sshSelected[i]; ok {
-				m.opts.SSHKeys = append(m.opts.SSHKeys, m.sshKeys[i].name)
+				m.opts.SSHKeyIdentifiers = append(m.opts.SSHKeyIdentifiers, m.sshKeys[i].name)
 			}
 		}
 		m.confirmIdx = 0
@@ -546,8 +546,8 @@ func (m serverCreateModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			// Create!
 			opts := m.opts
 			opts.Name = strings.TrimSpace(opts.Name)
-			if len(opts.SSHKeys) == 0 {
-				opts.SSHKeys = nil
+			if len(opts.SSHKeyIdentifiers) == 0 {
+				opts.SSHKeyIdentifiers = nil
 			}
 			m.result = &opts
 			return m, tea.Quit
@@ -558,8 +558,8 @@ func (m serverCreateModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	case "y":
 		opts := m.opts
 		opts.Name = strings.TrimSpace(opts.Name)
-		if len(opts.SSHKeys) == 0 {
-			opts.SSHKeys = nil
+		if len(opts.SSHKeyIdentifiers) == 0 {
+			opts.SSHKeyIdentifiers = nil
 		}
 		m.result = &opts
 		return m, tea.Quit
@@ -858,9 +858,9 @@ func (m serverCreateModel) renderConfirmStep() string {
 		renderField("Image", m.findLabel(m.images, m.opts.Image)),
 	}
 
-	if len(m.opts.SSHKeys) > 0 {
-		keyLabels := make([]string, len(m.opts.SSHKeys))
-		for i, k := range m.opts.SSHKeys {
+	if len(m.opts.SSHKeyIdentifiers) > 0 {
+		keyLabels := make([]string, len(m.opts.SSHKeyIdentifiers))
+		for i, k := range m.opts.SSHKeyIdentifiers {
 			keyLabels[i] = m.findLabel(m.sshKeys, k)
 		}
 		fields = append(fields, renderField("SSH keys", strings.Join(keyLabels, ", ")))

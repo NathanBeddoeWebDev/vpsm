@@ -111,7 +111,7 @@ func runCreate(cmd *cobra.Command, args []string) {
 		opts.Location = location
 	}
 	if len(sshKeys) > 0 {
-		opts.SSHKeys = sshKeys
+		opts.SSHKeyIdentifiers = sshKeys
 	}
 	if len(labels) > 0 {
 		opts.Labels = parseLabels(labels)
@@ -194,8 +194,8 @@ func logCreateOptsFull(cmd *cobra.Command, opts domain.CreateServerOpts) {
 	} else {
 		fmt.Fprintf(w, "  Location:    (auto)\n")
 	}
-	if len(opts.SSHKeys) > 0 {
-		fmt.Fprintf(w, "  SSH keys:    %s\n", strings.Join(opts.SSHKeys, ", "))
+	if len(opts.SSHKeyIdentifiers) > 0 {
+		fmt.Fprintf(w, "  SSH keys:    %s\n", strings.Join(opts.SSHKeyIdentifiers, ", "))
 	}
 	if len(opts.Labels) > 0 {
 		parts := make([]string, 0, len(opts.Labels))
