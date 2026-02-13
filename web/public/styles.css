@@ -40,3 +40,35 @@ h5,
 h6 {
     font-family: "Hubot";
 }
+
+.examples {
+    margin-top: 2.5rem;
+}
+
+.examples-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+}
+
+.example-card {
+    margin: 0;
+}
+
+.example-card img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.example-card figcaption {
+    margin-top: 0.5rem;
+    text-align: left;
+    line-height: 1.4;
+}
+
+@media (min-width: 768px) {
+    .examples-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
