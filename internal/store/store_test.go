@@ -7,11 +7,16 @@ import (
 	"time"
 )
 
-func tempStore(t *testing.T) *FileStore {
+func tempStore(t *testing.T) *SQLiteStore {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "actions.json")
-	return OpenAt(path)
+	path := filepath.Join(dir, "actions.db")
+	s, err := OpenAt(path)
+	if err != nil {
+		t.Fatalf("OpenAt failed: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
 }
 
 func TestSave_Insert(t *testing.T) {
@@ -196,39 +201,22 @@ func TestListRecent_All(t *testing.T) {
 func TestDeleteOlderThan(t *testing.T) {
 	s := tempStore(t)
 
-	// Insert an old completed action and a recent running one.
-	old := &ActionRecord{
-		Provider:  "hetzner",
-		ServerID:  "42",
-		Status:    "success",
-		CreatedAt: time.Now().UTC().Add(-48 * time.Hour),
-		UpdatedAt: time.Now().UTC().Add(-48 * time.Hour),
-	}
-	// We need to insert this manually since Save sets UpdatedAt.
-	s.Save(old)
-	// Hack: re-read, manually set old timestamp, re-save.
-	old.UpdatedAt = time.Now().UTC().Add(-48 * time.Hour)
-	s.Save(old) // UpdatedAt will be reset by Save, so we need a different approach.
-
-	// For testing, let's insert directly.
-	s2 := tempStore(t)
-
 	recent := &ActionRecord{
 		Provider: "hetzner",
 		ServerID: "43",
 		Status:   "running",
 	}
-	s2.Save(recent)
+	s.Save(recent)
 
 	completed := &ActionRecord{
 		Provider: "hetzner",
 		ServerID: "44",
 		Status:   "success",
 	}
-	s2.Save(completed)
+	s.Save(completed)
 
 	// Nothing should be deleted since everything is recent.
-	removed, err := s2.DeleteOlderThan(24 * time.Hour)
+	removed, err := s.DeleteOlderThan(24 * time.Hour)
 	if err != nil {
 		t.Fatalf("DeleteOlderThan failed: %v", err)
 	}
@@ -237,7 +225,7 @@ func TestDeleteOlderThan(t *testing.T) {
 	}
 
 	// Delete everything older than 0 (all completed).
-	removed, err = s2.DeleteOlderThan(0)
+	removed, err = s.DeleteOlderThan(0)
 	if err != nil {
 		t.Fatalf("DeleteOlderThan failed: %v", err)
 	}
@@ -246,18 +234,21 @@ func TestDeleteOlderThan(t *testing.T) {
 	}
 
 	// Running action should still be there.
-	pending, _ := s2.ListPending()
+	pending, _ := s.ListPending()
 	if len(pending) != 1 {
 		t.Errorf("expected 1 pending action remaining, got %d", len(pending))
 	}
 }
 
-func TestFileStore_Persistence(t *testing.T) {
+func TestSQLiteStore_Persistence(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "actions.json")
+	path := filepath.Join(dir, "actions.db")
 
 	// Write with one store instance.
-	s1 := OpenAt(path)
+	s1, err := OpenAt(path)
+	if err != nil {
+		t.Fatalf("OpenAt failed: %v", err)
+	}
 	r := &ActionRecord{
 		ActionID: "act-1",
 		Provider: "hetzner",
@@ -267,9 +258,15 @@ func TestFileStore_Persistence(t *testing.T) {
 	if err := s1.Save(r); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
+	s1.Close()
 
 	// Read with a new store instance.
-	s2 := OpenAt(path)
+	s2, err := OpenAt(path)
+	if err != nil {
+		t.Fatalf("OpenAt failed: %v", err)
+	}
+	defer s2.Close()
+
 	got, err := s2.Get(r.ID)
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
@@ -282,7 +279,7 @@ func TestFileStore_Persistence(t *testing.T) {
 	}
 }
 
-func TestFileStore_EmptyFile(t *testing.T) {
+func TestSQLiteStore_EmptyDB(t *testing.T) {
 	s := tempStore(t)
 
 	pending, err := s.ListPending()
@@ -294,14 +291,18 @@ func TestFileStore_EmptyFile(t *testing.T) {
 	}
 }
 
-func TestFileStore_CreatesDirectory(t *testing.T) {
+func TestSQLiteStore_CreatesDirectory(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "sub", "dir", "actions.json")
-	s := OpenAt(path)
+	path := filepath.Join(dir, "sub", "dir", "actions.db")
+	s, err := OpenAt(path)
+	if err != nil {
+		t.Fatalf("OpenAt failed to create nested directory: %v", err)
+	}
+	defer s.Close()
 
 	r := &ActionRecord{Provider: "hetzner", ServerID: "42", Status: "running"}
 	if err := s.Save(r); err != nil {
-		t.Fatalf("Save failed to create nested directory: %v", err)
+		t.Fatalf("Save failed: %v", err)
 	}
 
 	if _, err := os.Stat(path); err != nil {

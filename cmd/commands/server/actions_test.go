@@ -12,14 +12,19 @@ import (
 	"nathanbeddoewebdev/vpsm/internal/store"
 )
 
-// withTestStore sets up a temporary store for testing.
-func withTestStore(t *testing.T) *store.FileStore {
+// withTestStore sets up a temporary SQLite store for testing.
+func withTestStore(t *testing.T) *store.SQLiteStore {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "actions.json")
+	path := filepath.Join(dir, "actions.db")
 	store.SetPath(path)
 	t.Cleanup(func() { store.ResetPath() })
-	return store.OpenAt(path)
+	s, err := store.OpenAt(path)
+	if err != nil {
+		t.Fatalf("OpenAt failed: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
 }
 
 func execActions(t *testing.T, providerName string, extraArgs ...string) (stdout, stderr string) {

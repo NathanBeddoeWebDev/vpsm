@@ -4,32 +4,30 @@
 // so that if the process is interrupted (Ctrl+C, crash, etc.) the action
 // can be resumed on the next invocation.
 //
-// Storage is backed by a JSON file at ~/.config/vpsm/actions.json (or the
-// platform-equivalent path returned by os.UserConfigDir).
+// Storage is backed by a SQLite database at ~/.config/vpsm/actions.db
+// (or the platform-equivalent path returned by os.UserConfigDir).
 package store
 
 import (
-	"encoding/json"
-	"errors"
+	"database/sql"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
-	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 const (
-	appDir   = "vpsm"
-	fileName = "actions.json"
+	appDir = "vpsm"
+	dbFile = "actions.db"
 )
 
-// pathOverride, when non-empty, replaces the default file path.
+// pathOverride, when non-empty, replaces the default database path.
 // Intended for testing. Use SetPath / ResetPath to manage.
 var pathOverride string
 
-// SetPath overrides the actions file path. Intended for testing.
+// SetPath overrides the database path. Intended for testing.
 func SetPath(p string) { pathOverride = p }
 
 // ResetPath clears the path override. Intended for testing.
@@ -39,42 +37,42 @@ func ResetPath() { pathOverride = "" }
 // domain.ActionStatus with metadata needed to resume polling
 // after a CLI restart.
 type ActionRecord struct {
-	// ID is a locally unique identifier (auto-assigned).
-	ID int64 `json:"id"`
+	// ID is the auto-increment primary key (assigned on insert).
+	ID int64
 
 	// ActionID is the provider-specific action identifier used for polling.
-	ActionID string `json:"action_id"`
+	ActionID string
 
 	// Provider is the name of the cloud provider (e.g. "hetzner").
-	Provider string `json:"provider"`
+	Provider string
 
 	// ServerID is the ID of the server being acted upon.
-	ServerID string `json:"server_id"`
+	ServerID string
 
 	// ServerName is the human-readable server name (for display).
-	ServerName string `json:"server_name,omitempty"`
+	ServerName string
 
 	// Command describes the operation, e.g. "start_server", "stop_server".
-	Command string `json:"command"`
+	Command string
 
 	// TargetStatus is the expected server status when the action completes
 	// (e.g. "running", "off").
-	TargetStatus string `json:"target_status"`
+	TargetStatus string
 
 	// Status is the current state: "running", "success", or "error".
-	Status string `json:"status"`
+	Status string
 
 	// Progress is a percentage (0–100).
-	Progress int `json:"progress"`
+	Progress int
 
 	// ErrorMessage contains a human-readable explanation when Status is "error".
-	ErrorMessage string `json:"error_message,omitempty"`
+	ErrorMessage string
 
 	// CreatedAt is when the action was first recorded.
-	CreatedAt time.Time `json:"created_at"`
+	CreatedAt time.Time
 
 	// UpdatedAt is the last time the record was modified.
-	UpdatedAt time.Time `json:"updated_at"`
+	UpdatedAt time.Time
 }
 
 // ActionStore defines the persistence interface for action records.
@@ -97,21 +95,17 @@ type ActionStore interface {
 	// DeleteOlderThan removes completed/errored records older than d.
 	// Returns the number of records removed.
 	DeleteOlderThan(d time.Duration) (int64, error)
+
+	// Close releases database resources.
+	Close() error
 }
 
-// fileData is the on-disk JSON structure.
-type fileData struct {
-	NextID  int64          `json:"next_id"`
-	Actions []ActionRecord `json:"actions"`
+// SQLiteStore implements ActionStore backed by a local SQLite database.
+type SQLiteStore struct {
+	db *sql.DB
 }
 
-// FileStore implements ActionStore backed by a JSON file.
-type FileStore struct {
-	path string
-	mu   sync.Mutex
-}
-
-// DefaultPath returns the default actions file path.
+// DefaultPath returns the default database path.
 func DefaultPath() (string, error) {
 	if pathOverride != "" {
 		return pathOverride, nil
@@ -120,33 +114,67 @@ func DefaultPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("store: unable to determine config directory: %w", err)
 	}
-	return filepath.Join(base, appDir, fileName), nil
+	return filepath.Join(base, appDir, dbFile), nil
 }
 
 // Open creates or opens the action store at the default path.
-func Open() (*FileStore, error) {
+func Open() (*SQLiteStore, error) {
 	path, err := DefaultPath()
 	if err != nil {
 		return nil, err
 	}
-	return OpenAt(path), nil
+	return OpenAt(path)
 }
 
-// OpenAt creates or opens the action store at the given path.
-func OpenAt(path string) *FileStore {
-	return &FileStore{path: path}
+// OpenAt creates or opens a SQLite database at the given path.
+// The parent directory is created if it does not exist.
+func OpenAt(path string) (*SQLiteStore, error) {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("store: failed to create directory %s: %w", dir, err)
+	}
+
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(wal)")
+	if err != nil {
+		return nil, fmt.Errorf("store: failed to open database: %w", err)
+	}
+
+	s := &SQLiteStore{db: db}
+	if err := s.migrate(); err != nil {
+		db.Close()
+		return nil, err
+	}
+
+	return s, nil
+}
+
+// migrate creates the actions table if it doesn't exist.
+func (s *SQLiteStore) migrate() error {
+	const ddl = `
+		CREATE TABLE IF NOT EXISTS actions (
+			id            INTEGER PRIMARY KEY AUTOINCREMENT,
+			action_id     TEXT    NOT NULL DEFAULT '',
+			provider      TEXT    NOT NULL,
+			server_id     TEXT    NOT NULL,
+			server_name   TEXT    NOT NULL DEFAULT '',
+			command       TEXT    NOT NULL DEFAULT '',
+			target_status TEXT    NOT NULL DEFAULT '',
+			status        TEXT    NOT NULL DEFAULT 'running',
+			progress      INTEGER NOT NULL DEFAULT 0,
+			error_message TEXT    NOT NULL DEFAULT '',
+			created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+			updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+		);
+		CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status);
+	`
+	if _, err := s.db.Exec(ddl); err != nil {
+		return fmt.Errorf("store: migration failed: %w", err)
+	}
+	return nil
 }
 
 // Save inserts a new record (ID == 0) or updates an existing one.
-func (s *FileStore) Save(r *ActionRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	data, err := s.load()
-	if err != nil {
-		return err
-	}
-
+func (s *SQLiteStore) Save(r *ActionRecord) error {
 	r.UpdatedAt = time.Now().UTC()
 
 	if r.ID == 0 {
@@ -154,177 +182,137 @@ func (s *FileStore) Save(r *ActionRecord) error {
 		if r.CreatedAt.IsZero() {
 			r.CreatedAt = r.UpdatedAt
 		}
-		data.NextID++
-		r.ID = data.NextID
-		data.Actions = append(data.Actions, *r)
-	} else {
-		// Update
-		found := false
-		for i := range data.Actions {
-			if data.Actions[i].ID == r.ID {
-				data.Actions[i] = *r
-				found = true
-				break
-			}
+		result, err := s.db.Exec(`
+			INSERT INTO actions (action_id, provider, server_id, server_name, command, target_status, status, progress, error_message, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			r.ActionID, r.Provider, r.ServerID, r.ServerName, r.Command,
+			r.TargetStatus, r.Status, r.Progress, r.ErrorMessage,
+			r.CreatedAt.Format(time.RFC3339Nano), r.UpdatedAt.Format(time.RFC3339Nano),
+		)
+		if err != nil {
+			return fmt.Errorf("store: insert failed: %w", err)
 		}
-		if !found {
-			return fmt.Errorf("store: action with ID %d not found", r.ID)
+		id, err := result.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("store: failed to get last insert ID: %w", err)
 		}
+		r.ID = id
+		return nil
 	}
 
-	return s.save(data)
-}
-
-// Get retrieves a single action record by ID.
-func (s *FileStore) Get(id int64) (*ActionRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	data, err := s.load()
+	// Update
+	result, err := s.db.Exec(`
+		UPDATE actions SET action_id=?, provider=?, server_id=?, server_name=?,
+		       command=?, target_status=?, status=?, progress=?, error_message=?,
+		       updated_at=?
+		WHERE id=?`,
+		r.ActionID, r.Provider, r.ServerID, r.ServerName, r.Command,
+		r.TargetStatus, r.Status, r.Progress, r.ErrorMessage,
+		r.UpdatedAt.Format(time.RFC3339Nano), r.ID,
+	)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("store: update failed: %w", err)
 	}
-
-	for i := range data.Actions {
-		if data.Actions[i].ID == id {
-			r := data.Actions[i]
-			return &r, nil
-		}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("store: action with ID %d not found", r.ID)
 	}
-	return nil, nil
-}
-
-// ListPending returns all action records with status "running".
-func (s *FileStore) ListPending() ([]ActionRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	data, err := s.load()
-	if err != nil {
-		return nil, err
-	}
-
-	var result []ActionRecord
-	for _, r := range data.Actions {
-		if r.Status == "running" {
-			result = append(result, r)
-		}
-	}
-	sortByCreatedDesc(result)
-	return result, nil
-}
-
-// ListRecent returns the most recent n action records.
-func (s *FileStore) ListRecent(n int) ([]ActionRecord, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	data, err := s.load()
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]ActionRecord, len(data.Actions))
-	copy(result, data.Actions)
-	sortByCreatedDesc(result)
-
-	if n > 0 && len(result) > n {
-		result = result[:n]
-	}
-	return result, nil
-}
-
-// DeleteOlderThan removes completed/errored records older than d.
-func (s *FileStore) DeleteOlderThan(d time.Duration) (int64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	data, err := s.load()
-	if err != nil {
-		return 0, err
-	}
-
-	cutoff := time.Now().UTC().Add(-d)
-	var kept []ActionRecord
-	var removed int64
-
-	for _, r := range data.Actions {
-		if r.Status != "running" && r.UpdatedAt.Before(cutoff) {
-			removed++
-			continue
-		}
-		kept = append(kept, r)
-	}
-
-	if removed == 0 {
-		return 0, nil
-	}
-
-	data.Actions = kept
-	if err := s.save(data); err != nil {
-		return 0, err
-	}
-	return removed, nil
-}
-
-// load reads the JSON file from disk. Returns empty data if the file
-// does not exist.
-func (s *FileStore) load() (*fileData, error) {
-	raw, err := os.ReadFile(s.path)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return &fileData{}, nil
-		}
-		return nil, fmt.Errorf("store: failed to read %s: %w", s.path, err)
-	}
-
-	var data fileData
-	if err := json.Unmarshal(raw, &data); err != nil {
-		return nil, fmt.Errorf("store: failed to parse %s: %w", s.path, err)
-	}
-	return &data, nil
-}
-
-// save writes the JSON file atomically.
-func (s *FileStore) save(data *fileData) error {
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("store: failed to create directory %s: %w", dir, err)
-	}
-
-	payload, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		return fmt.Errorf("store: failed to marshal data: %w", err)
-	}
-	payload = append(payload, '\n')
-
-	// Atomic write: write to temp file then rename.
-	tmp, err := os.CreateTemp(dir, "actions-*.tmp")
-	if err != nil {
-		return fmt.Errorf("store: failed to create temp file: %w", err)
-	}
-	tmpName := tmp.Name()
-
-	if _, err := tmp.Write(payload); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
-		return fmt.Errorf("store: failed to write temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return fmt.Errorf("store: failed to close temp file: %w", err)
-	}
-
-	if err := os.Rename(tmpName, s.path); err != nil {
-		os.Remove(tmpName)
-		return fmt.Errorf("store: failed to rename temp file: %w", err)
-	}
-
 	return nil
 }
 
-func sortByCreatedDesc(records []ActionRecord) {
-	sort.Slice(records, func(i, j int) bool {
-		return records[i].CreatedAt.After(records[j].CreatedAt)
-	})
+// Get retrieves a single action record by ID.
+func (s *SQLiteStore) Get(id int64) (*ActionRecord, error) {
+	row := s.db.QueryRow(`
+		SELECT id, action_id, provider, server_id, server_name, command,
+		       target_status, status, progress, error_message, created_at, updated_at
+		FROM actions WHERE id = ?`, id)
+
+	r, err := scanRow(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: query failed: %w", err)
+	}
+	return r, nil
+}
+
+// ListPending returns all action records with status "running".
+func (s *SQLiteStore) ListPending() ([]ActionRecord, error) {
+	rows, err := s.db.Query(`
+		SELECT id, action_id, provider, server_id, server_name, command,
+		       target_status, status, progress, error_message, created_at, updated_at
+		FROM actions WHERE status = 'running' ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("store: query failed: %w", err)
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+// ListRecent returns the most recent n action records regardless of status.
+func (s *SQLiteStore) ListRecent(n int) ([]ActionRecord, error) {
+	rows, err := s.db.Query(`
+		SELECT id, action_id, provider, server_id, server_name, command,
+		       target_status, status, progress, error_message, created_at, updated_at
+		FROM actions ORDER BY created_at DESC LIMIT ?`, n)
+	if err != nil {
+		return nil, fmt.Errorf("store: query failed: %w", err)
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+// DeleteOlderThan removes completed/errored records older than d.
+func (s *SQLiteStore) DeleteOlderThan(d time.Duration) (int64, error) {
+	cutoff := time.Now().UTC().Add(-d).Format(time.RFC3339Nano)
+	result, err := s.db.Exec(`
+		DELETE FROM actions WHERE status != 'running' AND updated_at < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("store: delete failed: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Close releases database resources.
+func (s *SQLiteStore) Close() error {
+	return s.db.Close()
+}
+
+// scanRow scans a single row into an ActionRecord.
+func scanRow(row *sql.Row) (*ActionRecord, error) {
+	var r ActionRecord
+	var createdStr, updatedStr string
+	err := row.Scan(
+		&r.ID, &r.ActionID, &r.Provider, &r.ServerID, &r.ServerName,
+		&r.Command, &r.TargetStatus, &r.Status, &r.Progress, &r.ErrorMessage,
+		&createdStr, &updatedStr,
+	)
+	if err != nil {
+		return nil, err
+	}
+	r.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdStr)
+	r.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedStr)
+	return &r, nil
+}
+
+// scanRows scans multiple rows into ActionRecords.
+func scanRows(rows *sql.Rows) ([]ActionRecord, error) {
+	var records []ActionRecord
+	for rows.Next() {
+		var r ActionRecord
+		var createdStr, updatedStr string
+		err := rows.Scan(
+			&r.ID, &r.ActionID, &r.Provider, &r.ServerID, &r.ServerName,
+			&r.Command, &r.TargetStatus, &r.Status, &r.Progress, &r.ErrorMessage,
+			&createdStr, &updatedStr,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan failed: %w", err)
+		}
+		r.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdStr)
+		r.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedStr)
+		records = append(records, r)
+	}
+	return records, rows.Err()
 }

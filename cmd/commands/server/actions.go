@@ -52,6 +52,7 @@ func runActions(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error opening action store: %v\n", err)
 		return
 	}
+	defer s.Close()
 
 	if resume {
 		resumePendingActions(cmd, s)
@@ -106,7 +107,7 @@ func printActions(cmd *cobra.Command, actions []store.ActionRecord) {
 	w.Flush()
 }
 
-func resumePendingActions(cmd *cobra.Command, s *store.FileStore) {
+func resumePendingActions(cmd *cobra.Command, s *store.SQLiteStore) {
 	pending, err := s.ListPending()
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error listing pending actions: %v\n", err)
@@ -128,7 +129,7 @@ func resumePendingActions(cmd *cobra.Command, s *store.FileStore) {
 	}
 }
 
-func resumeAction(ctx context.Context, cmd *cobra.Command, s *store.FileStore, record store.ActionRecord) {
+func resumeAction(ctx context.Context, cmd *cobra.Command, s *store.SQLiteStore, record store.ActionRecord) {
 	providerName := record.Provider
 	provider, err := providers.Get(providerName, auth.DefaultStore())
 	if err != nil {
