@@ -33,11 +33,11 @@ func (m *mockProvider) GetServer(_ context.Context, id string) (*domain.Server, 
 func (m *mockProvider) ListServers(_ context.Context) ([]domain.Server, error) {
 	return m.servers, m.listErr
 }
-func (m *mockProvider) StartServer(_ context.Context, _ string) error {
-	return fmt.Errorf("not implemented")
+func (m *mockProvider) StartServer(_ context.Context, _ string) (*domain.ActionStatus, error) {
+	return nil, fmt.Errorf("not implemented")
 }
-func (m *mockProvider) StopServer(_ context.Context, _ string) error {
-	return fmt.Errorf("not implemented")
+func (m *mockProvider) StopServer(_ context.Context, _ string) (*domain.ActionStatus, error) {
+	return nil, fmt.Errorf("not implemented")
 }
 
 // registerMockProvider resets the global registry and registers a mock provider factory.

@@ -72,11 +72,12 @@ type serverShowModel struct {
 	status        string
 	statusIsError bool
 
-	// toggling is true while an async start/stop API call is in flight.
-	toggling bool
 	// toggleResult holds a success message to display after the post-toggle
 	// refresh completes.
 	toggleResult string
+
+	// poller encapsulates the start/stop polling state machine.
+	poller togglePoller
 
 	action   string
 	quitting bool
@@ -94,6 +95,7 @@ func RunServerShow(provider domain.Provider, providerName string, serverID strin
 		providerName: providerName,
 		loading:      true,
 		spinner:      s,
+		poller:       newTogglePoller(provider),
 	}
 
 	if serverID != "" {
@@ -131,6 +133,7 @@ func RunServerShowDirect(provider domain.Provider, providerName string, server *
 		server:       server,
 		loading:      false,
 		spinner:      s,
+		poller:       newTogglePoller(provider),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -178,29 +181,7 @@ func (m serverShowModel) fetchServer() tea.Cmd {
 	}
 }
 
-// toggleServer fires an async start or stop API call based on the server's
-// current status.
-func (m serverShowModel) toggleServer(server *domain.Server) tea.Cmd {
-	return func() tea.Msg {
-		ctx := context.Background()
-		switch server.Status {
-		case "running":
-			if err := m.provider.StopServer(ctx, server.ID); err != nil {
-				return serverToggleErrorMsg{err: fmt.Errorf("failed to stop server %q: %w", server.Name, err)}
-			}
-			return serverToggleDoneMsg{serverName: server.Name, action: "stopped"}
-		case "off", "stopped":
-			if err := m.provider.StartServer(ctx, server.ID); err != nil {
-				return serverToggleErrorMsg{err: fmt.Errorf("failed to start server %q: %w", server.Name, err)}
-			}
-			return serverToggleDoneMsg{serverName: server.Name, action: "started"}
-		default:
-			return serverToggleErrorMsg{
-				err: fmt.Errorf("cannot start/stop server %q: current status is %q", server.Name, server.Status),
-			}
-		}
-	}
-}
+// --- Update ---
 
 func (m serverShowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -242,26 +223,39 @@ func (m serverShowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		return m, nil
 
-	case serverToggleDoneMsg:
-		m.toggling = false
-		m.toggleResult = fmt.Sprintf("Server %q %s successfully", msg.serverName, msg.action)
-		if m.phase == showPhaseDetail && m.server != nil {
-			// Refresh the detail view.
-			m.loading = true
-			m.err = nil
-			m.serverID = m.server.ID
-			return m, tea.Batch(m.spinner.Tick, m.fetchServer())
-		}
-		return m, nil
+	// --- Toggle lifecycle (delegated to togglePoller) ---
+
+	case serverToggleInitiatedMsg:
+		var cmd tea.Cmd
+		var outcome *toggleOutcome
+		m.poller, cmd, outcome = m.poller.HandleInitiated(msg)
+		return m.applyToggleOutcome(outcome, cmd)
 
 	case serverToggleErrorMsg:
-		m.toggling = false
+		m.poller.active = false
 		m.status = msg.err.Error()
 		m.statusIsError = true
 		return m, nil
 
+	case pollActionTickMsg:
+		var cmd tea.Cmd
+		m.poller, cmd = m.poller.HandlePollTick()
+		return m, cmd
+
+	case pollActionResultMsg:
+		var cmd tea.Cmd
+		var outcome *toggleOutcome
+		m.poller, cmd, outcome = m.poller.HandlePollResult(msg)
+		return m.applyToggleOutcome(outcome, cmd)
+
+	case pollActionErrorMsg:
+		var cmd tea.Cmd
+		var outcome *toggleOutcome
+		m.poller, cmd, outcome = m.poller.HandlePollError(msg)
+		return m.applyToggleOutcome(outcome, cmd)
+
 	case spinner.TickMsg:
-		if m.loading || m.toggling {
+		if m.loading || m.poller.active {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -272,6 +266,36 @@ func (m serverShowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// applyToggleOutcome interprets a toggleOutcome from the poller and updates
+// the model accordingly. When the outcome signals success, the server detail
+// is refreshed. On error/timeout the status bar is updated.
+func (m serverShowModel) applyToggleOutcome(outcome *toggleOutcome, pollerCmd tea.Cmd) (tea.Model, tea.Cmd) {
+	if outcome == nil {
+		// Still polling — sync status text from poller.
+		m.status = m.poller.statusText
+		m.statusIsError = m.poller.statusError
+		return m, pollerCmd
+	}
+
+	if outcome.Success {
+		m.toggleResult = fmt.Sprintf("Server %q %s successfully", outcome.ServerName, outcome.Verb)
+		if m.phase == showPhaseDetail && m.server != nil {
+			m.loading = true
+			m.err = nil
+			m.serverID = m.server.ID
+			return m, tea.Batch(m.spinner.Tick, m.fetchServer())
+		}
+		return m, nil
+	}
+
+	// Error or timeout.
+	m.status = outcome.StatusText
+	m.statusIsError = outcome.IsError
+	return m, nil
+}
+
+// --- Key handling ---
+
 func (m serverShowModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		m.quitting = true
@@ -279,7 +303,7 @@ func (m serverShowModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Block input while loading or toggling.
-	if m.loading || m.toggling {
+	if m.loading || m.poller.active {
 		return m, nil
 	}
 
@@ -363,15 +387,15 @@ func (m serverShowModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.server != nil {
 			switch m.server.Status {
 			case "running":
-				m.toggling = true
+				m.poller.active = true
 				m.status = fmt.Sprintf("Stopping server %q...", m.server.Name)
 				m.statusIsError = false
-				return m, tea.Batch(m.spinner.Tick, m.toggleServer(m.server))
+				return m, tea.Batch(m.spinner.Tick, m.poller.InitiateToggle(domain.Server{ID: m.server.ID, Name: m.server.Name, Status: m.server.Status}))
 			case "off", "stopped":
-				m.toggling = true
+				m.poller.active = true
 				m.status = fmt.Sprintf("Starting server %q...", m.server.Name)
 				m.statusIsError = false
-				return m, tea.Batch(m.spinner.Tick, m.toggleServer(m.server))
+				return m, tea.Batch(m.spinner.Tick, m.poller.InitiateToggle(domain.Server{ID: m.server.ID, Name: m.server.Name, Status: m.server.Status}))
 			default:
 				m.status = fmt.Sprintf("Cannot start/stop server %q: status is %q", m.server.Name, m.server.Status)
 				m.statusIsError = true
@@ -392,6 +416,8 @@ func (m serverShowModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// --- View ---
+
 func (m serverShowModel) View() string {
 	if m.width == 0 || m.height == 0 {
 		return ""
@@ -401,7 +427,7 @@ func (m serverShowModel) View() string {
 
 	var footerBindings []components.KeyBinding
 	switch {
-	case m.loading || m.toggling:
+	case m.loading || m.poller.active:
 		footerBindings = []components.KeyBinding{{Key: "ctrl+c", Desc: "quit"}}
 	case m.phase == showPhaseSelect:
 		footerBindings = []components.KeyBinding{
@@ -455,9 +481,9 @@ func (m serverShowModel) renderContent(height int) string {
 		var loadingLabel string
 		switch m.phase {
 		case showPhaseSelect:
-			loadingLabel = "Fetching servers..."
+			loadingLabel = "Fetching servers…"
 		default:
-			loadingLabel = "Fetching server details..."
+			loadingLabel = "Fetching server details…"
 		}
 		loadingText := m.spinner.View() + "  " + loadingLabel
 		return lipgloss.Place(
@@ -467,7 +493,7 @@ func (m serverShowModel) renderContent(height int) string {
 		)
 	}
 
-	if m.toggling {
+	if m.poller.active {
 		toggleText := m.spinner.View() + "  " + m.status
 		return lipgloss.Place(
 			m.width, height,

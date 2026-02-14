@@ -10,8 +10,8 @@ type Provider interface {
 	DeleteServer(ctx context.Context, id string) error
 	GetServer(ctx context.Context, id string) (*Server, error)
 	ListServers(ctx context.Context) ([]Server, error)
-	StartServer(ctx context.Context, id string) error
-	StopServer(ctx context.Context, id string) error
+	StartServer(ctx context.Context, id string) (*ActionStatus, error)
+	StopServer(ctx context.Context, id string) (*ActionStatus, error)
 }
 
 // CatalogProvider extends Provider with methods that list the available
@@ -31,4 +31,14 @@ type SSHKeyManager interface {
 	Provider
 
 	CreateSSHKey(ctx context.Context, name, publicKey string) (*SSHKeySpec, error)
+}
+
+// ActionPoller extends Provider with the ability to poll the status of a
+// long-running action. Providers that support asynchronous operations
+// (e.g. Hetzner Cloud) implement this so the TUI and CLI can track
+// progress without blind-refreshing.
+type ActionPoller interface {
+	Provider
+
+	PollAction(ctx context.Context, actionID string) (*ActionStatus, error)
 }

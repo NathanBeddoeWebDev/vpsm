@@ -15,10 +15,10 @@ import (
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 )
 
-// Compile-time check that HetznerProvider satisfies CatalogProvider
-// (which embeds Provider).
+// Compile-time checks that HetznerProvider satisfies the required interfaces.
 var _ domain.CatalogProvider = (*HetznerProvider)(nil)
 var _ domain.SSHKeyManager = (*HetznerProvider)(nil)
+var _ domain.ActionPoller = (*HetznerProvider)(nil)
 
 // HetznerProvider implements domain.Provider using the Hetzner Cloud API.
 type HetznerProvider struct {
@@ -105,48 +105,71 @@ func (h *HetznerProvider) DeleteServer(ctx context.Context, id string) error {
 	return nil
 }
 
-// StartServer powers on a server by its ID.
-func (h *HetznerProvider) StartServer(ctx context.Context, id string) error {
-	err := h.hcloudService.StartServer(ctx, id)
+// StartServer powers on a server by its ID and returns the initial action
+// status so callers can poll for completion.
+func (h *HetznerProvider) StartServer(ctx context.Context, id string) (*domain.ActionStatus, error) {
+	action, err := h.hcloudService.StartServer(ctx, id)
 	if err != nil {
 		if hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
-			return fmt.Errorf("failed to start server: %w", domain.ErrNotFound)
+			return nil, fmt.Errorf("failed to start server: %w", domain.ErrNotFound)
 		}
 		if hcloud.IsError(err, hcloud.ErrorCodeUnauthorized) {
-			return fmt.Errorf("failed to start server: %w", domain.ErrUnauthorized)
+			return nil, fmt.Errorf("failed to start server: %w", domain.ErrUnauthorized)
 		}
 		if hcloud.IsError(err, hcloud.ErrorCodeRateLimitExceeded) {
-			return fmt.Errorf("failed to start server: %w", domain.ErrRateLimited)
+			return nil, fmt.Errorf("failed to start server: %w", domain.ErrRateLimited)
 		}
 		if hcloud.IsError(err, hcloud.ErrorCodeConflict) {
-			return fmt.Errorf("failed to start server: %w", domain.ErrConflict)
+			return nil, fmt.Errorf("failed to start server: %w", domain.ErrConflict)
 		}
-		return fmt.Errorf("failed to start server: %w", err)
+		return nil, fmt.Errorf("failed to start server: %w", err)
 	}
 
-	return nil
+	return action, nil
 }
 
-// StopServer gracefully shuts down a server by its ID.
-func (h *HetznerProvider) StopServer(ctx context.Context, id string) error {
-	err := h.hcloudService.StopServer(ctx, id)
+// StopServer gracefully shuts down a server by its ID and returns the
+// initial action status so callers can poll for completion.
+func (h *HetznerProvider) StopServer(ctx context.Context, id string) (*domain.ActionStatus, error) {
+	action, err := h.hcloudService.StopServer(ctx, id)
 	if err != nil {
 		if hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
-			return fmt.Errorf("failed to stop server: %w", domain.ErrNotFound)
+			return nil, fmt.Errorf("failed to stop server: %w", domain.ErrNotFound)
 		}
 		if hcloud.IsError(err, hcloud.ErrorCodeUnauthorized) {
-			return fmt.Errorf("failed to stop server: %w", domain.ErrUnauthorized)
+			return nil, fmt.Errorf("failed to stop server: %w", domain.ErrUnauthorized)
 		}
 		if hcloud.IsError(err, hcloud.ErrorCodeRateLimitExceeded) {
-			return fmt.Errorf("failed to stop server: %w", domain.ErrRateLimited)
+			return nil, fmt.Errorf("failed to stop server: %w", domain.ErrRateLimited)
 		}
 		if hcloud.IsError(err, hcloud.ErrorCodeConflict) {
-			return fmt.Errorf("failed to stop server: %w", domain.ErrConflict)
+			return nil, fmt.Errorf("failed to stop server: %w", domain.ErrConflict)
 		}
-		return fmt.Errorf("failed to stop server: %w", err)
+		return nil, fmt.Errorf("failed to stop server: %w", err)
 	}
 
-	return nil
+	return action, nil
+}
+
+// PollAction retrieves the current status of an in-flight action.
+// It maps provider-specific errors to domain sentinel errors so callers
+// can react to rate limiting without importing the hcloud SDK.
+func (h *HetznerProvider) PollAction(ctx context.Context, actionID string) (*domain.ActionStatus, error) {
+	action, err := h.hcloudService.PollAction(ctx, actionID)
+	if err != nil {
+		if hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
+			return nil, fmt.Errorf("action not found: %w", domain.ErrNotFound)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeRateLimitExceeded) {
+			return nil, fmt.Errorf("rate limited while polling action: %w", domain.ErrRateLimited)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeUnauthorized) {
+			return nil, fmt.Errorf("failed to poll action: %w", domain.ErrUnauthorized)
+		}
+		return nil, fmt.Errorf("failed to poll action: %w", err)
+	}
+
+	return action, nil
 }
 
 // GetServer retrieves a single server by its ID.

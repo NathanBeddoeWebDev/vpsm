@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
 
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
@@ -16,6 +18,11 @@ func StopCommand() *cobra.Command {
 		Use:   "stop",
 		Short: "Stop a running server",
 		Long: `Gracefully shut down a running server instance.
+
+The command waits for the operation to complete by polling the provider.
+If the provider supports action tracking (e.g. Hetzner), progress is
+reported via the action API. Otherwise, the server's status is polled
+until it reaches "off".
 
 Examples:
   vpsm server stop --provider hetzner --id 12345`,
@@ -41,9 +48,17 @@ func runStop(cmd *cobra.Command, args []string) {
 
 	fmt.Fprintf(cmd.ErrOrStderr(), "Stopping server %s...\n", serverID)
 
-	ctx := context.Background()
-	if err := provider.StopServer(ctx, serverID); err != nil {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	action, err := provider.StopServer(ctx, serverID)
+	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error stopping server: %v\n", err)
+		return
+	}
+
+	if err := waitForAction(ctx, provider, action, serverID, "off", cmd.ErrOrStderr()); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error waiting for server to stop: %v\n", err)
 		return
 	}
 

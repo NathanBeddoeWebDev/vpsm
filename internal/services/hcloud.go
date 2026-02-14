@@ -115,36 +115,92 @@ func (s *HCloudService) GetSSHKey(ctx context.Context, id string) (*hcloud.SSHKe
 	return sshKey, nil
 }
 
-// StartServer powers on a server by its ID. The ID must be a numeric string
+// StartServer powers on a server by its ID and returns the resulting action
+// status so callers can poll for completion. The ID must be a numeric string
 // matching the Hetzner server ID.
-func (s *HCloudService) StartServer(ctx context.Context, id string) error {
+func (s *HCloudService) StartServer(ctx context.Context, id string) (*domain.ActionStatus, error) {
 	numericID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
-		return fmt.Errorf("invalid server ID %q: %w", id, err)
+		return nil, fmt.Errorf("invalid server ID %q: %w", id, err)
 	}
 
-	return retry.Do(ctx, s.retryConfig, isHCloudRetryable, func() error {
+	var action *hcloud.Action
+	err = retry.Do(ctx, s.retryConfig, isHCloudRetryable, func() error {
 		reqCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
 		defer cancel()
-		_, _, apiErr := s.client.Server.Poweron(reqCtx, &hcloud.Server{ID: numericID})
+		var apiErr error
+		action, _, apiErr = s.client.Server.Poweron(reqCtx, &hcloud.Server{ID: numericID})
 		return apiErr
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	return toDomainAction(action), nil
 }
 
-// StopServer gracefully shuts down a server by its ID. The ID must be a
-// numeric string matching the Hetzner server ID.
-func (s *HCloudService) StopServer(ctx context.Context, id string) error {
+// StopServer gracefully shuts down a server by its ID and returns the
+// resulting action status so callers can poll for completion. The ID must
+// be a numeric string matching the Hetzner server ID.
+func (s *HCloudService) StopServer(ctx context.Context, id string) (*domain.ActionStatus, error) {
 	numericID, err := strconv.ParseInt(id, 10, 64)
 	if err != nil {
-		return fmt.Errorf("invalid server ID %q: %w", id, err)
+		return nil, fmt.Errorf("invalid server ID %q: %w", id, err)
 	}
 
-	return retry.Do(ctx, s.retryConfig, isHCloudRetryable, func() error {
+	var action *hcloud.Action
+	err = retry.Do(ctx, s.retryConfig, isHCloudRetryable, func() error {
 		reqCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
 		defer cancel()
-		_, _, apiErr := s.client.Server.Shutdown(reqCtx, &hcloud.Server{ID: numericID})
+		var apiErr error
+		action, _, apiErr = s.client.Server.Shutdown(reqCtx, &hcloud.Server{ID: numericID})
 		return apiErr
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	return toDomainAction(action), nil
+}
+
+// PollAction retrieves the current status of an action by its ID.
+// This is a single, non-retried request — callers are expected to
+// poll in a loop with appropriate intervals, so adding retry logic
+// here would compound rate-limit pressure.
+func (s *HCloudService) PollAction(ctx context.Context, actionID string) (*domain.ActionStatus, error) {
+	numericID, err := strconv.ParseInt(actionID, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid action ID %q: %w", actionID, err)
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
+	defer cancel()
+
+	action, _, err := s.client.Action.GetByID(reqCtx, numericID)
+	if err != nil {
+		return nil, err
+	}
+
+	if action == nil {
+		return nil, fmt.Errorf("action %q not found", actionID)
+	}
+
+	return toDomainAction(action), nil
+}
+
+// toDomainAction converts an hcloud.Action to a domain.ActionStatus.
+// A nil action (defensive) is treated as an immediate success.
+func toDomainAction(a *hcloud.Action) *domain.ActionStatus {
+	if a == nil {
+		return &domain.ActionStatus{Status: domain.ActionStatusSuccess}
+	}
+	return &domain.ActionStatus{
+		ID:           strconv.FormatInt(a.ID, 10),
+		Status:       string(a.Status),
+		Progress:     a.Progress,
+		Command:      a.Command,
+		ErrorMessage: a.ErrorMessage,
+	}
 }
 
 func isHCloudRetryable(err error) bool {

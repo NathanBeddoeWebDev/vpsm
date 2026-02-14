@@ -35,11 +35,11 @@ func (m *deleteMockProvider) GetServer(_ context.Context, id string) (*domain.Se
 func (m *deleteMockProvider) ListServers(_ context.Context) ([]domain.Server, error) {
 	return m.servers, m.listErr
 }
-func (m *deleteMockProvider) StartServer(_ context.Context, _ string) error {
-	return fmt.Errorf("not implemented")
+func (m *deleteMockProvider) StartServer(_ context.Context, _ string) (*domain.ActionStatus, error) {
+	return nil, fmt.Errorf("not implemented")
 }
-func (m *deleteMockProvider) StopServer(_ context.Context, _ string) error {
-	return fmt.Errorf("not implemented")
+func (m *deleteMockProvider) StopServer(_ context.Context, _ string) (*domain.ActionStatus, error) {
+	return nil, fmt.Errorf("not implemented")
 }
 
 // registerDeleteMockProvider resets the global registry and registers a delete mock.

@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
 
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
@@ -16,6 +18,9 @@ func StartCommand() *cobra.Command {
 		Use:   "start",
 		Short: "Start a server",
 		Long: `Power on a stopped server instance from the specified provider.
+
+The command waits for the operation to complete by polling the provider
+for action progress (or falling back to server-status polling).
 
 Examples:
   vpsm server start --provider hetzner --id 12345`,
@@ -41,9 +46,17 @@ func runStart(cmd *cobra.Command, args []string) {
 
 	fmt.Fprintf(cmd.ErrOrStderr(), "Starting server %s...\n", serverID)
 
-	ctx := context.Background()
-	if err := provider.StartServer(ctx, serverID); err != nil {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	action, err := provider.StartServer(ctx, serverID)
+	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error starting server: %v\n", err)
+		return
+	}
+
+	if err := waitForAction(ctx, provider, action, serverID, "running", cmd.ErrOrStderr()); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 		return
 	}
 
