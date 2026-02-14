@@ -41,6 +41,20 @@ h6 {
     font-family: "Hubot";
 }
 
+.hero-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.hero-logo {
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    object-fit: cover;
+}
+
 .examples {
     margin-top: 2.5rem;
 }
