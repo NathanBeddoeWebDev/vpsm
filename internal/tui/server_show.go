@@ -259,7 +259,8 @@ func (m serverShowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyToggleOutcome(outcome, cmd)
 
 	case spinner.TickMsg:
-		if m.loading || m.poller.active {
+		needsSpinner := m.loading || (!m.embedded && m.poller.active)
+		if needsSpinner {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -306,8 +307,9 @@ func (m serverShowModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	// Block input while loading or toggling.
-	if m.loading || m.poller.active {
+	// Block input while loading (or toggling in standalone mode).
+	blocking := m.loading || (!m.embedded && m.poller.active)
+	if blocking {
 		return m, nil
 	}
 
@@ -396,20 +398,33 @@ func (m serverShowModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "s":
 		if m.server != nil {
-			switch m.server.Status {
-			case "running":
-				m.poller.active = true
-				m.status = fmt.Sprintf("Stopping server %q...", m.server.Name)
-				m.statusIsError = false
-				return m, tea.Batch(m.spinner.Tick, m.poller.InitiateToggle(domain.Server{ID: m.server.ID, Name: m.server.Name, Status: m.server.Status}))
-			case "off", "stopped":
-				m.poller.active = true
-				m.status = fmt.Sprintf("Starting server %q...", m.server.Name)
-				m.statusIsError = false
-				return m, tea.Batch(m.spinner.Tick, m.poller.InitiateToggle(domain.Server{ID: m.server.ID, Name: m.server.Name, Status: m.server.Status}))
-			default:
-				m.status = fmt.Sprintf("Cannot start/stop server %q: status is %q", m.server.Name, m.server.Status)
-				m.statusIsError = true
+			if m.embedded {
+				// Delegate to the app-level overlay via message.
+				switch m.server.Status {
+				case "running", "off", "stopped":
+					server := domain.Server{ID: m.server.ID, Name: m.server.Name, Status: m.server.Status}
+					return m, func() tea.Msg { return requestToggleMsg{server: server} }
+				default:
+					m.status = fmt.Sprintf("Cannot start/stop server %q: status is %q", m.server.Name, m.server.Status)
+					m.statusIsError = true
+				}
+			} else {
+				// Standalone mode: use the embedded poller.
+				switch m.server.Status {
+				case "running":
+					m.poller.active = true
+					m.status = fmt.Sprintf("Stopping server %q...", m.server.Name)
+					m.statusIsError = false
+					return m, tea.Batch(m.spinner.Tick, m.poller.InitiateToggle(domain.Server{ID: m.server.ID, Name: m.server.Name, Status: m.server.Status}))
+				case "off", "stopped":
+					m.poller.active = true
+					m.status = fmt.Sprintf("Starting server %q...", m.server.Name)
+					m.statusIsError = false
+					return m, tea.Batch(m.spinner.Tick, m.poller.InitiateToggle(domain.Server{ID: m.server.ID, Name: m.server.Name, Status: m.server.Status}))
+				default:
+					m.status = fmt.Sprintf("Cannot start/stop server %q: status is %q", m.server.Name, m.server.Status)
+					m.statusIsError = true
+				}
 			}
 		}
 
@@ -437,8 +452,9 @@ func (m serverShowModel) View() string {
 	header := components.Header(m.width, "server show", m.providerName)
 
 	var footerBindings []components.KeyBinding
+	showReduced := m.loading || (!m.embedded && m.poller.active)
 	switch {
-	case m.loading || m.poller.active:
+	case showReduced:
 		footerBindings = []components.KeyBinding{{Key: "ctrl+c", Desc: "quit"}}
 	case m.phase == showPhaseSelect:
 		footerBindings = []components.KeyBinding{
@@ -504,7 +520,9 @@ func (m serverShowModel) renderContent(height int) string {
 		)
 	}
 
-	if m.poller.active {
+	// In standalone mode, replace content with a centered spinner during
+	// toggle. In embedded mode, the app-level overlay handles the visual.
+	if !m.embedded && m.poller.active {
 		toggleText := m.spinner.View() + "  " + m.status
 		return lipgloss.Place(
 			m.width, height,

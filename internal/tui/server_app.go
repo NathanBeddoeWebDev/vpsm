@@ -89,6 +89,10 @@ type serverAppModel struct {
 	delete serverDeleteModel
 	create serverCreateModel
 
+	// overlay manages concurrent start/stop operations and renders a
+	// floating panel in the bottom-right corner of the screen.
+	overlay opsOverlay
+
 	// Action state (appViewAction).
 	actionSpinner spinner.Model
 	actionLabel   string
@@ -118,6 +122,7 @@ func RunServerApp(provider domain.Provider, providerName string) (*AppResult, er
 		providerName:  providerName,
 		view:          appViewList,
 		list:          newServerListModel(provider, providerName),
+		overlay:       newOpsOverlay(provider),
 		actionSpinner: as,
 	}
 
@@ -176,25 +181,135 @@ func (m serverAppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case createResultMsg:
 		return m.handleCreateResult(msg)
+
+	// --- Toggle overlay ---
+
+	case requestToggleMsg:
+		var cmd tea.Cmd
+		m.overlay, cmd = m.overlay.StartToggle(msg.server)
+		return m, cmd
+
+	case opToggleInitiatedMsg, opToggleErrorMsg, opPollTickMsg,
+		opPollResultMsg, opPollErrorMsg, opDismissMsg:
+		return m.updateOverlay(msg)
+
+	// --- Spinner ticks ---
+	// Forward to both the overlay and the active child so both
+	// spinners animate.
+	case spinner.TickMsg:
+		return m.updateSpinnerTick(msg)
 	}
 
 	return m.updateChild(msg)
 }
 
-func (m serverAppModel) View() string {
+// updateOverlay delegates a message to the overlay and processes any
+// completed operations (e.g. refreshing the active child view).
+func (m serverAppModel) updateOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	var outcomes []opCompletedEvent
+	m.overlay, cmd, outcomes = m.overlay.Update(msg)
+
+	var cmds []tea.Cmd
+	if cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+
+	for _, ev := range outcomes {
+		if ev.Success {
+			switch m.view {
+			case appViewList:
+				cmds = append(cmds, m.list.fetchServers())
+			case appViewShow:
+				if m.show.server != nil {
+					m.show.serverID = m.show.server.ID
+					cmds = append(cmds, m.show.fetchServer())
+				}
+			}
+		}
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
+// updateSpinnerTick forwards spinner ticks to both the overlay and the
+// active child model so all spinners animate correctly.
+func (m serverAppModel) updateSpinnerTick(msg spinner.TickMsg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	// Forward to overlay.
+	var overlayCmd tea.Cmd
+	m.overlay, overlayCmd, _ = m.overlay.Update(msg)
+	if overlayCmd != nil {
+		cmds = append(cmds, overlayCmd)
+	}
+
+	// Forward to active child.
+	childModel, childCmd := m.updateChildDirect(msg)
+	m = childModel
+	if childCmd != nil {
+		cmds = append(cmds, childCmd)
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
+// updateChildDirect delegates a message to the active child and returns
+// the updated app model. Unlike updateChild it returns the concrete type
+// to avoid a double type assertion in callers.
+func (m serverAppModel) updateChildDirect(msg tea.Msg) (serverAppModel, tea.Cmd) {
 	switch m.view {
 	case appViewList:
-		return m.list.View()
+		updated, cmd := m.list.Update(msg)
+		m.list = updated.(serverListModel)
+		return m, cmd
 	case appViewShow:
-		return m.show.View()
+		updated, cmd := m.show.Update(msg)
+		m.show = updated.(serverShowModel)
+		return m, cmd
 	case appViewDelete:
-		return m.delete.View()
+		updated, cmd := m.delete.Update(msg)
+		m.delete = updated.(serverDeleteModel)
+		return m, cmd
 	case appViewCreate:
-		return m.create.View()
+		updated, cmd := m.create.Update(msg)
+		m.create = updated.(serverCreateModel)
+		return m, cmd
 	case appViewAction:
-		return m.renderAction()
+		return m.updateActionDirect(msg)
 	}
-	return ""
+	return m, nil
+}
+
+// updateActionDirect handles messages for the action view and returns
+// the concrete serverAppModel type.
+func (m serverAppModel) updateActionDirect(msg tea.Msg) (serverAppModel, tea.Cmd) {
+	result, cmd := m.updateAction(msg)
+	return result.(serverAppModel), cmd
+}
+
+func (m serverAppModel) View() string {
+	var view string
+	switch m.view {
+	case appViewList:
+		view = m.list.View()
+	case appViewShow:
+		view = m.show.View()
+	case appViewDelete:
+		view = m.delete.View()
+	case appViewCreate:
+		view = m.create.View()
+	case appViewAction:
+		view = m.renderAction()
+	}
+
+	// Composite the operations overlay on top of the child view.
+	if m.overlay.HasAny() {
+		overlayStr := m.overlay.View(m.width, m.height)
+		view = composeOverlay(view, overlayStr, m.width, m.height)
+	}
+
+	return view
 }
 
 // --- View transitions ---
@@ -415,7 +530,6 @@ func newServerListModel(provider domain.Provider, providerName string) serverLis
 		providerName: providerName,
 		loading:      true,
 		spinner:      s,
-		poller:       newTogglePoller(provider),
 		embedded:     true,
 	}
 }
@@ -432,7 +546,6 @@ func newServerShowDirect(provider domain.Provider, providerName string, server *
 		server:       server,
 		loading:      false,
 		spinner:      s,
-		poller:       newTogglePoller(provider),
 		embedded:     true,
 	}
 }
