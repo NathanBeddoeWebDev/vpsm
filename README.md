@@ -1,5 +1,6 @@
 # VPSM
 A worse version of [HCloud](https://hetzner.cloud) for now.
+![VPSM Logo - A Beaver with a server on his back](docs/images/Logo.jpg)
 
 ## Usage
 ```
