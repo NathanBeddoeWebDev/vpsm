@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 
+	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 
@@ -23,6 +24,9 @@ The command waits for the operation to complete by polling the provider.
 If the provider supports action tracking (e.g. Hetzner), progress is
 reported via the action API. Otherwise, the server's status is polled
 until it reaches "off".
+
+The action is persisted locally so that if the CLI is interrupted, the
+action can be resumed with "vpsm server actions --resume".
 
 Examples:
   vpsm server stop --provider hetzner --id 12345`,
@@ -57,10 +61,15 @@ func runStop(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	// Persist the action so it can be resumed if the CLI is interrupted.
+	record := trackAction(providerName, serverID, action, "stop_server", "off")
+
 	if err := waitForAction(ctx, provider, action, serverID, "off", cmd.ErrOrStderr()); err != nil {
+		finalizeAction(record, domain.ActionStatusError, err.Error())
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error waiting for server to stop: %v\n", err)
 		return
 	}
 
+	finalizeAction(record, domain.ActionStatusSuccess, "")
 	fmt.Fprintf(cmd.OutOrStdout(), "Server %s stop initiated successfully.\n", serverID)
 }
