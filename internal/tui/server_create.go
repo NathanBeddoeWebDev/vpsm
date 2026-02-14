@@ -116,6 +116,10 @@ type serverCreateModel struct {
 
 	result   *domain.CreateServerOpts
 	quitting bool
+
+	// embedded is true when this model is managed by serverAppModel.
+	// When true, navigation actions emit messages instead of tea.Quit.
+	embedded bool
 }
 
 // RunServerCreate starts the full-window server creation wizard.
@@ -380,6 +384,9 @@ func (m serverCreateModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.err != nil {
 		if msg.String() == "q" || msg.String() == "esc" {
+			if m.embedded {
+				return m, func() tea.Msg { return navigateBackMsg{} }
+			}
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -403,6 +410,9 @@ func (m serverCreateModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m serverCreateModel) handleNameKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
 		m.quitting = true
 		return m, tea.Quit
 	case "enter":
@@ -549,10 +559,16 @@ func (m serverCreateModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			if len(opts.SSHKeyIdentifiers) == 0 {
 				opts.SSHKeyIdentifiers = nil
 			}
+			if m.embedded {
+				return m, func() tea.Msg { return createConfirmedMsg{opts: opts} }
+			}
 			m.result = &opts
 			return m, tea.Quit
 		}
 		// Cancel.
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
 		m.quitting = true
 		return m, tea.Quit
 	case "y":
@@ -561,9 +577,15 @@ func (m serverCreateModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		if len(opts.SSHKeyIdentifiers) == 0 {
 			opts.SSHKeyIdentifiers = nil
 		}
+		if m.embedded {
+			return m, func() tea.Msg { return createConfirmedMsg{opts: opts} }
+		}
 		m.result = &opts
 		return m, tea.Quit
 	case "n":
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
 		m.quitting = true
 		return m, tea.Quit
 	}

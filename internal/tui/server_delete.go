@@ -47,6 +47,10 @@ type serverDeleteModel struct {
 
 	confirmed bool
 	quitting  bool
+
+	// embedded is true when this model is managed by serverAppModel.
+	// When true, navigation actions emit messages instead of tea.Quit.
+	embedded bool
 }
 
 // DeleteResult holds the outcome of the server delete TUI.
@@ -163,6 +167,9 @@ func (m serverDeleteModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m serverDeleteModel) handleSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.err != nil {
 		if msg.String() == "q" || msg.String() == "esc" {
+			if m.embedded {
+				return m, func() tea.Msg { return navigateBackMsg{} }
+			}
 			m.quitting = true
 			return m, tea.Quit
 		}
@@ -171,6 +178,9 @@ func (m serverDeleteModel) handleSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 
 	switch msg.String() {
 	case "q", "esc":
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
 		m.quitting = true
 		return m, tea.Quit
 	case "up", "k":
@@ -209,6 +219,9 @@ func (m serverDeleteModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 			m.server = nil
 			return m, nil
 		}
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
 		m.quitting = true
 		return m, tea.Quit
 	case "left", "h":
@@ -221,15 +234,29 @@ func (m serverDeleteModel) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		}
 	case "enter":
 		if m.confirmIdx == 0 {
+			if m.embedded && m.server != nil {
+				server := *m.server
+				return m, func() tea.Msg { return deleteConfirmedMsg{server: server} }
+			}
 			m.confirmed = true
 			return m, tea.Quit
+		}
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
 		}
 		m.quitting = true
 		return m, tea.Quit
 	case "y":
+		if m.embedded && m.server != nil {
+			server := *m.server
+			return m, func() tea.Msg { return deleteConfirmedMsg{server: server} }
+		}
 		m.confirmed = true
 		return m, tea.Quit
 	case "n":
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
 		m.quitting = true
 		return m, tea.Quit
 	}

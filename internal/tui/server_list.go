@@ -54,6 +54,10 @@ type serverListModel struct {
 	selectedServer *domain.Server
 	action         string // "show", "delete", or ""
 	quitting       bool
+
+	// embedded is true when this model is managed by serverAppModel.
+	// When true, navigation actions emit messages instead of tea.Quit.
+	embedded bool
 }
 
 // RunServerList starts the full-window interactive server list TUI.
@@ -238,6 +242,9 @@ func (m serverListModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if len(m.servers) > 0 {
 			server := m.servers[m.cursor]
+			if m.embedded {
+				return m, func() tea.Msg { return navigateToShowMsg{server: server} }
+			}
 			m.selectedServer = &server
 			m.action = "show"
 			return m, tea.Quit
@@ -246,6 +253,9 @@ func (m serverListModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		if len(m.servers) > 0 {
 			server := m.servers[m.cursor]
+			if m.embedded {
+				return m, func() tea.Msg { return navigateToDeleteMsg{server: server} }
+			}
 			m.selectedServer = &server
 			m.action = "delete"
 			return m, tea.Quit
@@ -272,6 +282,9 @@ func (m serverListModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "c":
+		if m.embedded {
+			return m, func() tea.Msg { return navigateToCreateMsg{} }
+		}
 		m.action = "create"
 		return m, tea.Quit
 

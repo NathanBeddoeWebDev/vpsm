@@ -63,23 +63,9 @@ func runShow(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		selected, action, err := tui.RunServerList(provider, providerName)
-		if err != nil {
+		// Interactive full-window TUI with seamless view transitions.
+		if _, err := tui.RunServerApp(provider, providerName); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-			return
-		}
-
-		switch action {
-		case "show":
-			if selected != nil {
-				runShowFromList(cmd, provider, providerName, selected)
-			}
-		case "delete":
-			if selected != nil {
-				runDeleteFromList(cmd, provider, providerName, selected)
-			}
-		case "create":
-			runCreateFromList(cmd, provider, providerName)
 		}
 		return
 	}

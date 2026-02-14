@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -62,85 +61,12 @@ func runList(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Interactive full-window TUI.
-	selected, action, err := tui.RunServerList(provider, providerName)
-	if err != nil {
+	// Interactive full-window TUI. Runs a single Bubbletea program that
+	// manages all view transitions (list, show, delete, create) internally,
+	// eliminating screen flicker between views.
+	if _, err := tui.RunServerApp(provider, providerName); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
 	}
-
-	// Handle actions from the list view.
-	switch action {
-	case "show":
-		if selected != nil {
-			runShowFromList(cmd, provider, providerName, selected)
-		}
-	case "delete":
-		if selected != nil {
-			runDeleteFromList(cmd, provider, providerName, selected)
-		}
-	case "create":
-		runCreateFromList(cmd, provider, providerName)
-	}
-}
-
-func runShowFromList(cmd *cobra.Command, provider domain.Provider, providerName string, server *domain.Server) {
-	result, err := tui.RunServerShowDirect(provider, providerName, server)
-	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
-	}
-
-	if result != nil && result.Action == "delete" {
-		runDeleteFromList(cmd, provider, providerName, result.Server)
-	}
-}
-
-func runDeleteFromList(cmd *cobra.Command, provider domain.Provider, providerName string, server *domain.Server) {
-	result, err := tui.RunServerDelete(provider, providerName, server)
-	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
-	}
-
-	if result != nil && result.Confirmed {
-		ctx := context.Background()
-		if err := provider.DeleteServer(ctx, result.Server.ID); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error deleting server: %v\n", err)
-			return
-		}
-		fmt.Fprintf(cmd.OutOrStdout(), "Server %q (ID: %s) deleted successfully.\n", result.Server.Name, result.Server.ID)
-	}
-}
-
-func runCreateFromList(cmd *cobra.Command, provider domain.Provider, providerName string) {
-	catalogProvider, ok := provider.(domain.CatalogProvider)
-	if !ok {
-		fmt.Fprintln(cmd.ErrOrStderr(), "Interactive server creation is not supported for this provider.")
-		return
-	}
-
-	opts, err := tui.RunServerCreate(catalogProvider, providerName, domain.CreateServerOpts{})
-	if err != nil {
-		if errors.Is(err, tui.ErrAborted) {
-			return
-		}
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
-	}
-
-	if opts == nil {
-		return
-	}
-
-	ctx := context.Background()
-	server, err := provider.CreateServer(ctx, *opts)
-	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error creating server: %v\n", err)
-		return
-	}
-
-	printCreateTable(cmd, server)
 }
 
 func runListNonInteractive(cmd *cobra.Command, provider domain.Provider, output string) {

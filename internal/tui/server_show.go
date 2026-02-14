@@ -81,6 +81,10 @@ type serverShowModel struct {
 
 	action   string
 	quitting bool
+
+	// embedded is true when this model is managed by serverAppModel.
+	// When true, navigation actions emit messages instead of tea.Quit.
+	embedded bool
 }
 
 // RunServerShow starts the full-window server detail TUI.
@@ -374,11 +378,18 @@ func (m serverShowModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.statusIsError = false
 			return m, nil
 		}
+		if m.embedded {
+			return m, func() tea.Msg { return navigateBackMsg{} }
+		}
 		m.quitting = true
 		return m, tea.Quit
 
 	case "d":
 		if m.server != nil {
+			if m.embedded {
+				server := *m.server
+				return m, func() tea.Msg { return navigateToDeleteMsg{server: server} }
+			}
 			m.action = "delete"
 			return m, tea.Quit
 		}
