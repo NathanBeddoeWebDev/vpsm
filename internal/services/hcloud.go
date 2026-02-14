@@ -2,31 +2,50 @@ package services
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"time"
+
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/retry"
-	"sync"
-	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 )
 
 type HCloudService struct {
-	client *hcloud.Client
+	client         *hcloud.Client
+	retryConfig    retry.Config
+	requestTimeout time.Duration
 }
 
+const defaultRequestTimeout = 30 * time.Second
+
 func NewHCloudService(token string) *HCloudService {
+	client := hcloud.NewClient(hcloud.WithToken(token))
+	return NewHCloudServiceWithClient(client, retry.DefaultConfig(), defaultRequestTimeout)
+}
+
+func NewHCloudServiceWithClient(client *hcloud.Client, retryConfig retry.Config, requestTimeout time.Duration) *HCloudService {
+	if requestTimeout <= 0 {
+		requestTimeout = defaultRequestTimeout
+	}
+
 	return &HCloudService{
-		client: hcloud.NewClient(hcloud.WithToken(token)),
+		client:         client,
+		retryConfig:    retryConfig,
+		requestTimeout: requestTimeout,
 	}
 }
 
 func (s *HCloudService) GetServer(ctx context.Context, id string) (*hcloud.Server, error) {
-	server, _, err := s.client.Server.Get(ctx, id)
+	reqCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
+	defer cancel()
 
+	server, _, err := s.client.Server.Get(reqCtx, id)
 	return server, err
 }
 
-func (s *HCloudService) CreateServer(ctx context.Context, opts domain.CreateServerOpts) (hcloud.ServerCreateResult, *hcloud.Response, error) {
+func (s *HCloudService) CreateServer(ctx context.Context, opts *domain.CreateServerOpts) (domain.Server, error) {
 	hcloudOpts := hcloud.ServerCreateOpts{
 		Name:             opts.Name,
 		ServerType:       &hcloud.ServerType{Name: opts.ServerType},
@@ -36,44 +55,113 @@ func (s *HCloudService) CreateServer(ctx context.Context, opts domain.CreateServ
 		StartAfterCreate: opts.StartAfterCreate,
 	}
 
-	// can we use goroutines to run these fetches in parallel for cases where many ssh keys are selected?
-	var wg sync.WaitGroup
-	for _, sshKeyID := range opts.SSHKeyIdentifiers {
-		wg.Add(1)
-		go func(id string) {
-			defer wg.Done()
-			sshKey, _, err := s.client.SSHKey.Get(ctx, id)
-			if err != nil {
-				return
-			}
-			hcloudOpts.SSHKeys = append(hcloudOpts.SSHKeys, sshKey)
-		}(sshKeyID)
-	}
-
 	if opts.Location != "" {
 		hcloudOpts.Location = &hcloud.Location{Name: opts.Location}
 	}
 
-	return s.client.Server.Create(ctx, hcloudOpts)
+	for _, key := range opts.SSHKeyIdentifiers {
+		reqCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
+		defer cancel()
+		sshKey, apiErr := s.GetSSHKey(reqCtx, key)
+		if apiErr != nil {
+			return domain.Server{}, fmt.Errorf("failed to resolve SSH key %q: %w", key, apiErr)
+		}
+		if sshKey == nil {
+			return domain.Server{}, fmt.Errorf("SSH key %q not found", key)
+		}
+		hcloudOpts.SSHKeys = append(hcloudOpts.SSHKeys, sshKey)
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
+	defer cancel()
+	res, _, err := s.client.Server.Create(reqCtx, hcloudOpts)
+	if err != nil {
+		return domain.Server{}, err
+	}
+
+	server := domain.Server{
+		ID:        strconv.FormatInt(res.Server.ID, 10),
+		Name:      res.Server.Name,
+		Status:    string(res.Server.Status),
+		CreatedAt: res.Server.Created,
+		Provider:  "hetzner",
+	}
+
+	if res.Server.ServerType != nil {
+		server.ServerType = res.Server.ServerType.Name
+	}
+	if res.Server.Image != nil {
+		server.Image = res.Server.Image.Name
+	}
+	if res.Server.Location != nil {
+		server.Region = res.Server.Location.Name
+	}
+
+	return server, nil
 }
 
-// What happens if this fails?
 func (s *HCloudService) GetSSHKey(ctx context.Context, id string) (*hcloud.SSHKey, error) {
 	var sshKey *hcloud.SSHKey
-	var err error
-	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(time.Duration.Seconds(5)))
-	defer cancel()
+	if err := retry.Do(ctx, s.retryConfig, isHCloudRetryable, func() error {
+		reqCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
+		defer cancel()
+		var apiErr error
+		sshKey, _, apiErr = s.client.SSHKey.Get(reqCtx, id)
+		return apiErr
+	}); err != nil {
+		return nil, err
+	}
 
-	retry.Do(ctx, retry.Config{MaxAttempts: 2, BaseDelay: 100}, func(error) bool {
-		return true
-	}, func() error {
-		sshKey, _, err = s.client.SSHKey.Get(reqCtx, id)
-		return err
-	})
-
-	return sshKey, err
+	return sshKey, nil
 }
 
-func shouldRetryOnErrors(err error) bool {
-	return err != nil && err != context.Canceled && err != context.DeadlineExceeded
+// StartServer powers on a server by its ID. The ID must be a numeric string
+// matching the Hetzner server ID.
+func (s *HCloudService) StartServer(ctx context.Context, id string) error {
+	numericID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid server ID %q: %w", id, err)
+	}
+
+	return retry.Do(ctx, s.retryConfig, isHCloudRetryable, func() error {
+		reqCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
+		defer cancel()
+		_, _, apiErr := s.client.Server.Poweron(reqCtx, &hcloud.Server{ID: numericID})
+		return apiErr
+	})
+}
+
+// StopServer gracefully shuts down a server by its ID. The ID must be a
+// numeric string matching the Hetzner server ID.
+func (s *HCloudService) StopServer(ctx context.Context, id string) error {
+	numericID, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid server ID %q: %w", id, err)
+	}
+
+	return retry.Do(ctx, s.retryConfig, isHCloudRetryable, func() error {
+		reqCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
+		defer cancel()
+		_, _, apiErr := s.client.Server.Shutdown(reqCtx, &hcloud.Server{ID: numericID})
+		return apiErr
+	})
+}
+
+func isHCloudRetryable(err error) bool {
+	if retry.IsRetryable(err) {
+		return true
+	}
+
+	return hcloud.IsError(
+		err,
+		hcloud.ErrorCodeRateLimitExceeded,
+		hcloud.ErrorCodeServiceError,
+		hcloud.ErrorCodeServerError,
+		hcloud.ErrorCodeTimeout,
+		hcloud.ErrorCodeUnknownError,
+		hcloud.ErrorCodeResourceUnavailable,
+		hcloud.ErrorCodeMaintenance,
+		hcloud.ErrorCodeRobotUnavailable,
+		hcloud.ErrorCodeLocked,
+	)
 }

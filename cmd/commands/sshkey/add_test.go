@@ -42,6 +42,14 @@ func (m *sshKeyMockProvider) ListServers(_ context.Context) ([]domain.Server, er
 	return nil, fmt.Errorf("not implemented")
 }
 
+func (m *sshKeyMockProvider) StartServer(_ context.Context, _ string) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (m *sshKeyMockProvider) StopServer(_ context.Context, _ string) error {
+	return fmt.Errorf("not implemented")
+}
+
 func (m *sshKeyMockProvider) CreateSSHKey(_ context.Context, name, publicKey string) (*domain.SSHKeySpec, error) {
 	m.capturedName = name
 	m.capturedPublicKey = publicKey
@@ -316,6 +324,14 @@ func (m *basicMockProvider) GetServer(_ context.Context, id string) (*domain.Ser
 }
 func (m *basicMockProvider) ListServers(_ context.Context) ([]domain.Server, error) {
 	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *basicMockProvider) StartServer(_ context.Context, _ string) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (m *basicMockProvider) StopServer(_ context.Context, _ string) error {
+	return fmt.Errorf("not implemented")
 }
 
 func TestSuggestKeyName(t *testing.T) {

@@ -31,6 +31,12 @@ func (m *showMockProvider) CreateServer(_ context.Context, _ domain.CreateServer
 func (m *showMockProvider) DeleteServer(_ context.Context, _ string) error {
 	return fmt.Errorf("not implemented")
 }
+func (m *showMockProvider) StartServer(_ context.Context, _ string) error {
+	return fmt.Errorf("not implemented")
+}
+func (m *showMockProvider) StopServer(_ context.Context, _ string) error {
+	return fmt.Errorf("not implemented")
+}
 func (m *showMockProvider) GetServer(_ context.Context, id string) (*domain.Server, error) {
 	m.gotID = id
 	return m.getServer, m.getErr

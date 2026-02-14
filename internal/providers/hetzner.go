@@ -9,6 +9,7 @@ import (
 	"nathanbeddoewebdev/vpsm/internal/cache"
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/retry"
+	"nathanbeddoewebdev/vpsm/internal/services"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -21,9 +22,10 @@ var _ domain.SSHKeyManager = (*HetznerProvider)(nil)
 
 // HetznerProvider implements domain.Provider using the Hetzner Cloud API.
 type HetznerProvider struct {
-	client      *hcloud.Client
-	cache       *cache.Cache
-	retryConfig retry.Config
+	client        *hcloud.Client
+	cache         *cache.Cache
+	retryConfig   retry.Config
+	hcloudService *services.HCloudService
 }
 
 const (
@@ -38,10 +40,13 @@ func NewHetznerProvider(opts ...hcloud.ClientOption) *HetznerProvider {
 		hcloud.WithApplication("vpsm", "0.1.0"),
 	}
 	allOpts := append(defaults, opts...)
+	client := hcloud.NewClient(allOpts...)
+	retryConfig := retry.DefaultConfig()
 	return &HetznerProvider{
-		client:      hcloud.NewClient(allOpts...),
-		cache:       cache.NewDefault(),
-		retryConfig: retry.DefaultConfig(),
+		client:        client,
+		cache:         cache.NewDefault(),
+		retryConfig:   retryConfig,
+		hcloudService: services.NewHCloudServiceWithClient(client, retryConfig, requestTimeout),
 	}
 }
 
@@ -59,6 +64,15 @@ func RegisterHetzner() {
 
 func (h *HetznerProvider) GetDisplayName() string {
 	return "Hetzner"
+}
+
+func (h *HetznerProvider) CreateServer(ctx context.Context, opts domain.CreateServerOpts) (*domain.Server, error) {
+	server, err := h.hcloudService.CreateServer(ctx, &opts)
+	if err != nil {
+		return nil, err
+	}
+
+	return &server, nil
 }
 
 // DeleteServer removes a server by its ID. The ID must be a numeric string
@@ -86,6 +100,50 @@ func (h *HetznerProvider) DeleteServer(ctx context.Context, id string) error {
 			return fmt.Errorf("failed to delete server: %w", domain.ErrRateLimited)
 		}
 		return fmt.Errorf("failed to delete server: %w", err)
+	}
+
+	return nil
+}
+
+// StartServer powers on a server by its ID.
+func (h *HetznerProvider) StartServer(ctx context.Context, id string) error {
+	err := h.hcloudService.StartServer(ctx, id)
+	if err != nil {
+		if hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
+			return fmt.Errorf("failed to start server: %w", domain.ErrNotFound)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeUnauthorized) {
+			return fmt.Errorf("failed to start server: %w", domain.ErrUnauthorized)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeRateLimitExceeded) {
+			return fmt.Errorf("failed to start server: %w", domain.ErrRateLimited)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeConflict) {
+			return fmt.Errorf("failed to start server: %w", domain.ErrConflict)
+		}
+		return fmt.Errorf("failed to start server: %w", err)
+	}
+
+	return nil
+}
+
+// StopServer gracefully shuts down a server by its ID.
+func (h *HetznerProvider) StopServer(ctx context.Context, id string) error {
+	err := h.hcloudService.StopServer(ctx, id)
+	if err != nil {
+		if hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
+			return fmt.Errorf("failed to stop server: %w", domain.ErrNotFound)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeUnauthorized) {
+			return fmt.Errorf("failed to stop server: %w", domain.ErrUnauthorized)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeRateLimitExceeded) {
+			return fmt.Errorf("failed to stop server: %w", domain.ErrRateLimited)
+		}
+		if hcloud.IsError(err, hcloud.ErrorCodeConflict) {
+			return fmt.Errorf("failed to stop server: %w", domain.ErrConflict)
+		}
+		return fmt.Errorf("failed to stop server: %w", err)
 	}
 
 	return nil

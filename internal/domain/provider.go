@@ -10,6 +10,8 @@ type Provider interface {
 	DeleteServer(ctx context.Context, id string) error
 	GetServer(ctx context.Context, id string) (*Server, error)
 	ListServers(ctx context.Context) ([]Server, error)
+	StartServer(ctx context.Context, id string) error
+	StopServer(ctx context.Context, id string) error
 }
 
 // CatalogProvider extends Provider with methods that list the available

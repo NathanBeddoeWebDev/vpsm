@@ -20,6 +20,8 @@ func NewCommand() *cobra.Command {
 	cmd.AddCommand(DeleteCommand())
 	cmd.AddCommand(ListCommand())
 	cmd.AddCommand(ShowCommand())
+	cmd.AddCommand(StartCommand())
+	cmd.AddCommand(StopCommand())
 
 	cmd.PersistentFlags().String("provider", "", "Cloud provider to use (overrides default)")
 

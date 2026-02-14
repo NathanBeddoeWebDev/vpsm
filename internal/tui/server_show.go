@@ -68,6 +68,16 @@ type serverShowModel struct {
 	spinner spinner.Model
 	err     error
 
+	// Status bar state.
+	status        string
+	statusIsError bool
+
+	// toggling is true while an async start/stop API call is in flight.
+	toggling bool
+	// toggleResult holds a success message to display after the post-toggle
+	// refresh completes.
+	toggleResult string
+
 	action   string
 	quitting bool
 }
@@ -168,6 +178,30 @@ func (m serverShowModel) fetchServer() tea.Cmd {
 	}
 }
 
+// toggleServer fires an async start or stop API call based on the server's
+// current status.
+func (m serverShowModel) toggleServer(server *domain.Server) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		switch server.Status {
+		case "running":
+			if err := m.provider.StopServer(ctx, server.ID); err != nil {
+				return serverToggleErrorMsg{err: fmt.Errorf("failed to stop server %q: %w", server.Name, err)}
+			}
+			return serverToggleDoneMsg{serverName: server.Name, action: "stopped"}
+		case "off", "stopped":
+			if err := m.provider.StartServer(ctx, server.ID); err != nil {
+				return serverToggleErrorMsg{err: fmt.Errorf("failed to start server %q: %w", server.Name, err)}
+			}
+			return serverToggleDoneMsg{serverName: server.Name, action: "started"}
+		default:
+			return serverToggleErrorMsg{
+				err: fmt.Errorf("cannot start/stop server %q: current status is %q", server.Name, server.Status),
+			}
+		}
+	}
+}
+
 func (m serverShowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -193,6 +227,14 @@ func (m serverShowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.server = msg.server
 		m.err = nil
+		if m.toggleResult != "" {
+			m.status = m.toggleResult
+			m.statusIsError = false
+			m.toggleResult = ""
+		} else {
+			m.status = ""
+			m.statusIsError = false
+		}
 		return m, nil
 
 	case serverDetailErrorMsg:
@@ -200,8 +242,26 @@ func (m serverShowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		return m, nil
 
+	case serverToggleDoneMsg:
+		m.toggling = false
+		m.toggleResult = fmt.Sprintf("Server %q %s successfully", msg.serverName, msg.action)
+		if m.phase == showPhaseDetail && m.server != nil {
+			// Refresh the detail view.
+			m.loading = true
+			m.err = nil
+			m.serverID = m.server.ID
+			return m, tea.Batch(m.spinner.Tick, m.fetchServer())
+		}
+		return m, nil
+
+	case serverToggleErrorMsg:
+		m.toggling = false
+		m.status = msg.err.Error()
+		m.statusIsError = true
+		return m, nil
+
 	case spinner.TickMsg:
-		if m.loading {
+		if m.loading || m.toggling {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -218,7 +278,8 @@ func (m serverShowModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	if m.loading {
+	// Block input while loading or toggling.
+	if m.loading || m.toggling {
 		return m, nil
 	}
 
@@ -267,6 +328,8 @@ func (m serverShowModel) handleSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.fromSelect = true
 			m.loading = true
 			m.err = nil
+			m.status = ""
+			m.statusIsError = false
 			return m, tea.Batch(m.spinner.Tick, m.fetchServer())
 		}
 	}
@@ -283,6 +346,8 @@ func (m serverShowModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.server = nil
 			m.serverID = ""
 			m.err = nil
+			m.status = ""
+			m.statusIsError = false
 			return m, nil
 		}
 		m.quitting = true
@@ -294,11 +359,32 @@ func (m serverShowModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+	case "s":
+		if m.server != nil {
+			switch m.server.Status {
+			case "running":
+				m.toggling = true
+				m.status = fmt.Sprintf("Stopping server %q...", m.server.Name)
+				m.statusIsError = false
+				return m, tea.Batch(m.spinner.Tick, m.toggleServer(m.server))
+			case "off", "stopped":
+				m.toggling = true
+				m.status = fmt.Sprintf("Starting server %q...", m.server.Name)
+				m.statusIsError = false
+				return m, tea.Batch(m.spinner.Tick, m.toggleServer(m.server))
+			default:
+				m.status = fmt.Sprintf("Cannot start/stop server %q: status is %q", m.server.Name, m.server.Status)
+				m.statusIsError = true
+			}
+		}
+
 	case "r":
 		if m.server != nil {
 			m.loading = true
 			m.serverID = m.server.ID
 			m.err = nil
+			m.status = ""
+			m.statusIsError = false
 			return m, tea.Batch(m.spinner.Tick, m.fetchServer())
 		}
 	}
@@ -315,7 +401,7 @@ func (m serverShowModel) View() string {
 
 	var footerBindings []components.KeyBinding
 	switch {
-	case m.loading:
+	case m.loading || m.toggling:
 		footerBindings = []components.KeyBinding{{Key: "ctrl+c", Desc: "quit"}}
 	case m.phase == showPhaseSelect:
 		footerBindings = []components.KeyBinding{
@@ -325,6 +411,7 @@ func (m serverShowModel) View() string {
 		}
 	case m.phase == showPhaseDetail:
 		bindings := []components.KeyBinding{
+			{Key: "s", Desc: "start/stop"},
 			{Key: "d", Desc: "delete"},
 			{Key: "r", Desc: "refresh"},
 		}
@@ -336,16 +423,31 @@ func (m serverShowModel) View() string {
 	}
 	footer := components.Footer(m.width, footerBindings)
 
+	statusBar := ""
+	if m.err != nil {
+		// Errors are rendered inline in the content area, not in the status bar.
+	} else if m.status != "" {
+		statusBar = components.StatusBar(m.width, m.status, m.statusIsError)
+	}
+
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
-	contentH := m.height - headerH - footerH
+	statusH := lipgloss.Height(statusBar)
+	contentH := m.height - headerH - footerH - statusH
 	if contentH < 1 {
 		contentH = 1
 	}
 
 	content := m.renderContent(contentH)
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
+	// Assemble the full layout.
+	sections := []string{header, content}
+	if statusBar != "" {
+		sections = append(sections, statusBar)
+	}
+	sections = append(sections, footer)
+
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
 }
 
 func (m serverShowModel) renderContent(height int) string {
@@ -362,6 +464,15 @@ func (m serverShowModel) renderContent(height int) string {
 			m.width, height,
 			lipgloss.Center, lipgloss.Center,
 			styles.MutedText.Render(loadingText),
+		)
+	}
+
+	if m.toggling {
+		toggleText := m.spinner.View() + "  " + m.status
+		return lipgloss.Place(
+			m.width, height,
+			lipgloss.Center, lipgloss.Center,
+			styles.MutedText.Render(toggleText),
 		)
 	}
 
