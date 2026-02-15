@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/tui/components"
@@ -332,7 +333,28 @@ func (m serverAppModel) View() string {
 		view = composeOverlay(view, overlayStr, m.width, m.height)
 	}
 
+	// Pad the view to exactly m.height lines so Bubbletea's alt screen
+	// renderer always repaints the full terminal. Without this, dismissing
+	// the overlay (which previously padded the output) leaves ghost lines
+	// from the prior frame.
+	view = padToHeight(view, m.width, m.height)
+
 	return view
+}
+
+// padToHeight ensures the view string has exactly `height` lines by
+// appending blank lines if necessary. This prevents ghost rendering
+// artifacts when the terminal's alt screen buffer retains content from
+// previous frames.
+func padToHeight(view string, width, height int) string {
+	if height <= 0 {
+		return view
+	}
+	lines := strings.Split(view, "\n")
+	for len(lines) < height {
+		lines = append(lines, strings.Repeat(" ", width))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // --- View transitions ---
