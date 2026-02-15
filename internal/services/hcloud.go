@@ -203,6 +203,29 @@ func toDomainAction(a *hcloud.Action) *domain.ActionStatus {
 	}
 }
 
+// GetServerMetrics fetches metrics for a server over the given time range.
+// Uses retry logic for transient errors (rate-limits, server errors).
+func (s *HCloudService) GetServerMetrics(ctx context.Context, serverID string, opts hcloud.ServerGetMetricsOpts) (*hcloud.ServerMetrics, error) {
+	numericID, err := strconv.ParseInt(serverID, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid server ID %q: %w", serverID, err)
+	}
+
+	var metrics *hcloud.ServerMetrics
+	err = retry.Do(ctx, s.retryConfig, isHCloudRetryable, func() error {
+		reqCtx, cancel := context.WithTimeout(ctx, s.requestTimeout)
+		defer cancel()
+		var apiErr error
+		metrics, _, apiErr = s.client.Server.GetMetrics(reqCtx, &hcloud.Server{ID: numericID}, opts)
+		return apiErr
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return metrics, nil
+}
+
 func isHCloudRetryable(err error) bool {
 	if retry.IsRetryable(err) {
 		return true

@@ -540,13 +540,15 @@ func newServerShowDirect(provider domain.Provider, providerName string, server *
 	s.Style = lipgloss.NewStyle().Foreground(styles.Blue)
 
 	return serverShowModel{
-		provider:     provider,
-		providerName: providerName,
-		phase:        showPhaseDetail,
-		server:       server,
-		loading:      false,
-		spinner:      s,
-		embedded:     true,
+		provider:       provider,
+		providerName:   providerName,
+		phase:          showPhaseDetail,
+		server:         server,
+		serverID:       server.ID,
+		loading:        false,
+		metricsLoading: true,
+		spinner:        s,
+		embedded:       true,
 	}
 }
 

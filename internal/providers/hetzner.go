@@ -19,6 +19,7 @@ import (
 var _ domain.CatalogProvider = (*HetznerProvider)(nil)
 var _ domain.SSHKeyManager = (*HetznerProvider)(nil)
 var _ domain.ActionPoller = (*HetznerProvider)(nil)
+var _ domain.MetricsProvider = (*HetznerProvider)(nil)
 
 // HetznerProvider implements domain.Provider using the Hetzner Cloud API.
 type HetznerProvider struct {

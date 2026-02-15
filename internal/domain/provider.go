@@ -1,6 +1,9 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Provider defines the core operations every VPS provider must support.
 type Provider interface {
@@ -41,4 +44,13 @@ type ActionPoller interface {
 	Provider
 
 	PollAction(ctx context.Context, actionID string) (*ActionStatus, error)
+}
+
+// MetricsProvider extends Provider with server metrics retrieval.
+// Providers that expose time-series telemetry (CPU, disk, network)
+// implement this so the TUI can render usage charts.
+type MetricsProvider interface {
+	Provider
+
+	GetServerMetrics(ctx context.Context, serverID string, types []MetricType, start, end time.Time) (*ServerMetrics, error)
 }
