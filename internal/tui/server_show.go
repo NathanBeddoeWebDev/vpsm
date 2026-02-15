@@ -9,6 +9,7 @@ import (
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/tui/components"
 	"nathanbeddoewebdev/vpsm/internal/tui/styles"
+	"nathanbeddoewebdev/vpsm/internal/util"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -947,6 +948,7 @@ func (m serverShowModel) renderMetricsSection(cardWidth int, sectionStyle lipglo
 
 // extractMetricValues extracts the float64 values from a named time series.
 func extractMetricValues(m *domain.ServerMetrics, key string) []float64 {
+	key = util.NormalizeKey(key)
 	ts, ok := m.TimeSeries[key]
 	if !ok {
 		return nil

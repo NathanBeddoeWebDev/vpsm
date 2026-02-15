@@ -26,6 +26,8 @@ func (h *HetznerProvider) GetServerMetrics(ctx context.Context, serverID string,
 			hcloudTypes = append(hcloudTypes, hcloud.ServerMetricDisk)
 		case domain.MetricNetwork:
 			hcloudTypes = append(hcloudTypes, hcloud.ServerMetricNetwork)
+		default:
+			return nil, fmt.Errorf("unsupported metric type: %q", t)
 		}
 	}
 
@@ -63,6 +65,12 @@ func (h *HetznerProvider) GetServerMetrics(ctx context.Context, serverID string,
 // toDomainMetrics converts hcloud.ServerMetrics to domain.ServerMetrics.
 // Values that cannot be parsed as float64 are silently skipped.
 func toDomainMetrics(hz *hcloud.ServerMetrics) *domain.ServerMetrics {
+	if hz == nil {
+		return &domain.ServerMetrics{
+			TimeSeries: make(map[string]domain.MetricsTimeSeries),
+		}
+	}
+
 	ts := make(map[string]domain.MetricsTimeSeries, len(hz.TimeSeries))
 
 	for name, values := range hz.TimeSeries {

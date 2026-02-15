@@ -6,8 +6,11 @@ import "time"
 type MetricType string
 
 const (
-	MetricCPU     MetricType = "cpu"
-	MetricDisk    MetricType = "disk"
+	// MetricCPU represents CPU usage metrics.
+	MetricCPU MetricType = "cpu"
+	// MetricDisk represents disk I/O metrics.
+	MetricDisk MetricType = "disk"
+	// MetricNetwork represents network bandwidth metrics.
 	MetricNetwork MetricType = "network"
 )
 

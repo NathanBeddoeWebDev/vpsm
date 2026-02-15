@@ -237,11 +237,15 @@ func MetricsDualChart(label string, series1, series2 []float64, legend1, legend2
 		chartWidth = 20
 	}
 
+	// Capture original emptiness before filling with zeros for chart rendering.
+	orig1Empty := len(series1) == 0
+	orig2Empty := len(series2) == 0
+
 	// Ensure both series are present for the chart; use empty slice as fallback.
-	if len(series1) == 0 {
+	if orig1Empty {
 		series1 = make([]float64, len(series2))
 	}
-	if len(series2) == 0 {
+	if orig2Empty {
 		series2 = make([]float64, len(series1))
 	}
 
@@ -254,14 +258,14 @@ func MetricsDualChart(label string, series1, series2 []float64, legend1, legend2
 	legendStyle2 := lipgloss.NewStyle().Foreground(colors.Color2).Bold(true)
 
 	var summaryParts []string
-	if len(series1) > 0 {
+	if !orig1Empty {
 		cur1 := series1[len(series1)-1]
 		min1, max1 := minMax(series1)
 		summaryParts = append(summaryParts,
 			renderLegendSummary(legend1, legendStyle1, cur1, min1, max1, suffix),
 		)
 	}
-	if len(series2) > 0 {
+	if !orig2Empty {
 		cur2 := series2[len(series2)-1]
 		min2, max2 := minMax(series2)
 		summaryParts = append(summaryParts,
