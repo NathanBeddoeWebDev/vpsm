@@ -42,6 +42,85 @@
                 </p>
             </div>
 
+            <div>
+                <h2>Download</h2>
+                <p>Latest release — grab the binary for your platform:</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Operating System</th>
+                            <th>Architecture</th>
+                            <th>Download</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>macOS</td>
+                            <td>Apple Silicon (arm64)</td>
+                            <td>
+                                <a href="https://github.com/NathanBeddoeWebDev/vpsm/releases/latest/download/vpsm-darwin-arm64">vpsm-darwin-arm64</a>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>macOS</td>
+                            <td>Intel (amd64)</td>
+                            <td>
+                                <a href="https://github.com/NathanBeddoeWebDev/vpsm/releases/latest/download/vpsm-darwin-amd64">vpsm-darwin-amd64</a>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Linux</td>
+                            <td>x86_64 (amd64)</td>
+                            <td>
+                                <a href="https://github.com/NathanBeddoeWebDev/vpsm/releases/latest/download/vpsm-linux-amd64">vpsm-linux-amd64</a>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Linux</td>
+                            <td>ARM64</td>
+                            <td>
+                                <a href="https://github.com/NathanBeddoeWebDev/vpsm/releases/latest/download/vpsm-linux-arm64">vpsm-linux-arm64</a>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Windows</td>
+                            <td>x86_64 (amd64)</td>
+                            <td>
+                                <a href="https://github.com/NathanBeddoeWebDev/vpsm/releases/latest/download/vpsm-windows-amd64.exe">vpsm-windows-amd64.exe</a>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <p>
+                    <small>
+                        Checksums:
+                        <a href="https://github.com/NathanBeddoeWebDev/vpsm/releases/latest/download/checksums.txt">checksums.txt</a>
+                        · All releases:
+                        <a href="https://github.com/NathanBeddoeWebDev/vpsm/releases">GitHub Releases</a>
+                    </small>
+                </p>
+
+                <h3>Installation</h3>
+                <p>After downloading, make the binary executable and move it to your PATH:</p>
+                
+                <p><strong>macOS / Linux:</strong></p>
+                <pre><code>chmod +x ~/Downloads/vpsm-*
+sudo mv ~/Downloads/vpsm-* /usr/local/bin/vpsm
+vpsm --help</code></pre>
+
+                <p><strong>Windows (PowerShell as Administrator):</strong></p>
+                <pre><code># Create a local bin directory if it doesn't exist
+New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA\bin
+Move-Item $env:USERPROFILE\Downloads\vpsm-windows-amd64.exe $env:LOCALAPPDATA\bin\vpsm.exe
+
+# Add to PATH (restart terminal after)
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:LOCALAPPDATA\bin", "User")
+
+vpsm --help</code></pre>
+            </div>
+
             <div class="examples">
                 <h2>Examples</h2>
                 <div class="examples-grid">

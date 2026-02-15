@@ -6,6 +6,7 @@ BUILD_DIR := build
 VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME = $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+REMOTE   ?= origin
 
 # Optimised linker flags: strip debug info + embed version metadata
 LDFLAGS := -s -w \
@@ -70,6 +71,12 @@ release:
 install:
 	CGO_ENABLED=0 go install -trimpath -ldflags '$(LDFLAGS)' .
 
+.PHONY: tag
+tag:
+	@[ -n "$(TAG)" ] || (echo "TAG is required (e.g. make tag TAG=v1.2.3)"; exit 1)
+	git tag -a "$(TAG)" -m "Release $(TAG)"
+	git push $(REMOTE) "$(TAG)"
+
 .PHONY: help
 help:
 	@echo "Usage:"
@@ -81,5 +88,6 @@ help:
 	@echo "  make clean         Remove build artefacts and caches"
 	@echo "  make release       Cross-compile for linux/darwin/windows (amd64+arm64)"
 	@echo "  make install       Install to GOPATH/bin"
+	@echo "  make tag           Create and push a git tag (TAG=v1.2.3, REMOTE=origin)"
 	@echo ""
 	@echo "Override version:  make build VERSION=1.0.0"
