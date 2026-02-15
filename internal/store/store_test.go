@@ -10,7 +10,7 @@ import (
 func tempStore(t *testing.T) *SQLiteStore {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "actions.db")
+	path := filepath.Join(dir, "vpsm.db")
 	s, err := OpenAt(path)
 	if err != nil {
 		t.Fatalf("OpenAt failed: %v", err)
@@ -242,7 +242,7 @@ func TestDeleteOlderThan(t *testing.T) {
 
 func TestSQLiteStore_Persistence(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "actions.db")
+	path := filepath.Join(dir, "vpsm.db")
 
 	// Write with one store instance.
 	s1, err := OpenAt(path)
@@ -293,7 +293,7 @@ func TestSQLiteStore_EmptyDB(t *testing.T) {
 
 func TestSQLiteStore_CreatesDirectory(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "sub", "dir", "actions.db")
+	path := filepath.Join(dir, "sub", "dir", "vpsm.db")
 	s, err := OpenAt(path)
 	if err != nil {
 		t.Fatalf("OpenAt failed to create nested directory: %v", err)

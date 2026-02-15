@@ -86,6 +86,7 @@ func trackAction(providerName, serverID string, action *domain.ActionStatus, com
 	if err != nil {
 		return nil
 	}
+	defer s.Close()
 
 	record := &store.ActionRecord{
 		ActionID:     action.ID,
@@ -118,6 +119,7 @@ func finalizeAction(record *store.ActionRecord, status, errMsg string) {
 	if err != nil {
 		return
 	}
+	defer s.Close()
 
 	record.Status = status
 	record.ErrorMessage = errMsg

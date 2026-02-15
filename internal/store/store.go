@@ -4,7 +4,7 @@
 // so that if the process is interrupted (Ctrl+C, crash, etc.) the action
 // can be resumed on the next invocation.
 //
-// Storage is backed by a SQLite database at ~/.config/vpsm/actions.db
+// Storage is backed by a SQLite database at ~/.config/vpsm/vpsm.db
 // (or the platform-equivalent path returned by os.UserConfigDir).
 package store
 
@@ -20,7 +20,7 @@ import (
 
 const (
 	appDir = "vpsm"
-	dbFile = "actions.db"
+	dbFile = "vpsm.db"
 )
 
 // pathOverride, when non-empty, replaces the default database path.
@@ -134,7 +134,7 @@ func OpenAt(path string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("store: failed to create directory %s: %w", dir, err)
 	}
 
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(wal)")
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)")
 	if err != nil {
 		return nil, fmt.Errorf("store: failed to open database: %w", err)
 	}
@@ -149,6 +149,12 @@ func OpenAt(path string) (*SQLiteStore, error) {
 }
 
 // migrate creates the actions table if it doesn't exist.
+//
+// The vpsm.db database may also contain these tables (currently unused):
+//   - provider_accounts: Multi-account provider credential storage (future feature)
+//   - server_cache: Local cache of server metadata for offline/fast access (future feature)
+//
+// These tables are preserved for future functionality.
 func (s *SQLiteStore) migrate() error {
 	const ddl = `
 		CREATE TABLE IF NOT EXISTS actions (

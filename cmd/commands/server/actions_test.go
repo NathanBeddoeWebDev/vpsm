@@ -16,7 +16,7 @@ import (
 func withTestStore(t *testing.T) *store.SQLiteStore {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "actions.db")
+	path := filepath.Join(dir, "vpsm.db")
 	store.SetPath(path)
 	t.Cleanup(func() { store.ResetPath() })
 	s, err := store.OpenAt(path)
