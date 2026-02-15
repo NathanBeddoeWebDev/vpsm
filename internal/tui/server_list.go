@@ -430,9 +430,9 @@ func (m serverListModel) renderTable(height int) string {
 		totalMin += c.width
 	}
 
-	showID := available >= totalMin+8
+	showID := available >= totalMin+14
 	if showID {
-		cols = append([]column{{title: "ID", width: 8}}, cols...)
+		cols = append([]column{{title: "ID", width: 14}}, cols...)
 	}
 
 	// Distribute remaining width to the NAME column.
