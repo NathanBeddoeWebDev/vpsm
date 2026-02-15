@@ -72,9 +72,9 @@ type serverShowModel struct {
 	status        string
 	statusIsError bool
 
-	// toggleResult holds a success message to display after the post-toggle
-	// refresh completes.
-	toggleResult string
+	// persistentStatus holds a status message that should survive refresh cycles
+	// (used for toggle results, SSH errors, delete/create confirmations).
+	persistentStatus string
 
 	// poller encapsulates the start/stop polling state machine.
 	poller togglePoller
@@ -212,10 +212,10 @@ func (m serverShowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.server = msg.server
 		m.err = nil
-		if m.toggleResult != "" {
-			m.status = m.toggleResult
+		if m.persistentStatus != "" {
+			m.status = m.persistentStatus
 			m.statusIsError = false
-			m.toggleResult = ""
+			m.persistentStatus = ""
 		} else {
 			m.status = ""
 			m.statusIsError = false
@@ -283,7 +283,7 @@ func (m serverShowModel) applyToggleOutcome(outcome *toggleOutcome, pollerCmd te
 	}
 
 	if outcome.Success {
-		m.toggleResult = fmt.Sprintf("Server %q %s successfully", outcome.ServerName, outcome.Verb)
+		m.persistentStatus = fmt.Sprintf("Server %q %s successfully", outcome.ServerName, outcome.Verb)
 		if m.phase == showPhaseDetail && m.server != nil {
 			m.loading = true
 			m.err = nil
@@ -437,6 +437,15 @@ func (m serverShowModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.statusIsError = false
 			return m, tea.Batch(m.spinner.Tick, m.fetchServer())
 		}
+
+	case "c":
+		if m.server != nil && m.embedded && m.server.Status == "running" {
+			hasPublicIP := m.server.PublicIPv4 != "" || m.server.PublicIPv6 != ""
+			if hasPublicIP {
+				server := *m.server
+				return m, func() tea.Msg { return navigateToSSHMsg{server: server} }
+			}
+		}
 	}
 
 	return m, nil
@@ -467,6 +476,11 @@ func (m serverShowModel) View() string {
 			{Key: "s", Desc: "start/stop"},
 			{Key: "d", Desc: "delete"},
 			{Key: "r", Desc: "refresh"},
+		}
+		// Show SSH keybinding if server is running and has a public IP.
+		canSSH := m.server != nil && m.server.Status == "running" && (m.server.PublicIPv4 != "" || m.server.PublicIPv6 != "")
+		if canSSH {
+			bindings = append(bindings, components.KeyBinding{Key: "c", Desc: "ssh"})
 		}
 		if m.fromSelect {
 			bindings = append(bindings, components.KeyBinding{Key: "esc", Desc: "back"})

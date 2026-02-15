@@ -41,9 +41,9 @@ type serverListModel struct {
 	err     error
 	status  string
 
-	// toggleResult holds a success message to display after the post-toggle
-	// refresh completes.
-	toggleResult string
+	// persistentStatus holds a status message that should survive refresh cycles
+	// (used for toggle results, delete/create confirmations).
+	persistentStatus string
 	// statusIsError controls whether the status bar renders in error style.
 	statusIsError bool
 
@@ -118,10 +118,10 @@ func (m serverListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.servers = msg.servers
 		m.err = nil
-		if m.toggleResult != "" {
-			m.status = m.toggleResult
+		if m.persistentStatus != "" {
+			m.status = m.persistentStatus
 			m.statusIsError = false
-			m.toggleResult = ""
+			m.persistentStatus = ""
 		} else if len(m.servers) == 0 {
 			m.status = "No servers found."
 			m.statusIsError = false
@@ -195,7 +195,7 @@ func (m serverListModel) applyToggleOutcome(outcome *toggleOutcome, pollerCmd te
 
 	if outcome.Success {
 		m.loading = true
-		m.toggleResult = fmt.Sprintf("Server %q %s successfully", outcome.ServerName, outcome.Verb)
+		m.persistentStatus = fmt.Sprintf("Server %q %s successfully", outcome.ServerName, outcome.Verb)
 		return m, tea.Batch(m.spinner.Tick, m.fetchServers())
 	}
 
