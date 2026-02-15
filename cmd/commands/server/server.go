@@ -21,6 +21,7 @@ func NewCommand() *cobra.Command {
 	cmd.AddCommand(CreateCommand())
 	cmd.AddCommand(DeleteCommand())
 	cmd.AddCommand(ListCommand())
+	cmd.AddCommand(MetricsCommand())
 	cmd.AddCommand(ShowCommand())
 	cmd.AddCommand(SSHCommand())
 	cmd.AddCommand(StartCommand())

@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/tui/components"
 	"nathanbeddoewebdev/vpsm/internal/tui/styles"
+	"nathanbeddoewebdev/vpsm/internal/util"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -21,6 +25,14 @@ type serverDetailLoadedMsg struct {
 }
 
 type serverDetailErrorMsg struct {
+	err error
+}
+
+type metricsLoadedMsg struct {
+	metrics *domain.ServerMetrics
+}
+
+type metricsErrorMsg struct {
 	err error
 }
 
@@ -82,9 +94,54 @@ type serverShowModel struct {
 	action   string
 	quitting bool
 
+	// Metrics state (loaded independently from server detail).
+	metrics        *domain.ServerMetrics
+	metricsLoading bool
+	metricsErr     error
+
+	// Viewport for scrollable detail view.
+	viewport viewport.Model
+
 	// embedded is true when this model is managed by serverAppModel.
 	// When true, navigation actions emit messages instead of tea.Quit.
 	embedded bool
+}
+
+// detailViewportKeyMap returns a viewport KeyMap that avoids conflicts with
+// the detail view's own key bindings (d=delete, s=start/stop).
+func detailViewportKeyMap() viewport.KeyMap {
+	return viewport.KeyMap{
+		PageDown: key.NewBinding(
+			key.WithKeys("pgdown"),
+			key.WithHelp("pgdn", "page down"),
+		),
+		PageUp: key.NewBinding(
+			key.WithKeys("pgup"),
+			key.WithHelp("pgup", "page up"),
+		),
+		HalfPageUp: key.NewBinding(
+			key.WithKeys("ctrl+u"),
+			key.WithHelp("ctrl+u", "½ page up"),
+		),
+		HalfPageDown: key.NewBinding(
+			key.WithKeys("ctrl+d"),
+			key.WithHelp("ctrl+d", "½ page down"),
+		),
+		Up: key.NewBinding(
+			key.WithKeys("up", "k"),
+			key.WithHelp("↑/k", "up"),
+		),
+		Down: key.NewBinding(
+			key.WithKeys("down", "j"),
+			key.WithHelp("↓/j", "down"),
+		),
+		Left: key.NewBinding(
+			key.WithDisabled(),
+		),
+		Right: key.NewBinding(
+			key.WithDisabled(),
+		),
+	}
 }
 
 // RunServerShow starts the full-window server detail TUI.
@@ -94,12 +151,16 @@ func RunServerShow(provider domain.Provider, providerName string, serverID strin
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(styles.Blue)
 
+	vp := viewport.New(0, 0)
+	vp.KeyMap = detailViewportKeyMap()
+
 	m := serverShowModel{
 		provider:     provider,
 		providerName: providerName,
 		loading:      true,
 		spinner:      s,
 		poller:       newTogglePoller(provider),
+		viewport:     vp,
 	}
 
 	if serverID != "" {
@@ -130,14 +191,20 @@ func RunServerShowDirect(provider domain.Provider, providerName string, server *
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(styles.Blue)
 
+	vp := viewport.New(0, 0)
+	vp.KeyMap = detailViewportKeyMap()
+
 	m := serverShowModel{
-		provider:     provider,
-		providerName: providerName,
-		phase:        showPhaseDetail,
-		server:       server,
-		loading:      false,
-		spinner:      s,
-		poller:       newTogglePoller(provider),
+		provider:       provider,
+		providerName:   providerName,
+		phase:          showPhaseDetail,
+		server:         server,
+		serverID:       server.ID,
+		loading:        false,
+		metricsLoading: true,
+		spinner:        s,
+		poller:         newTogglePoller(provider),
+		viewport:       vp,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -162,6 +229,11 @@ func (m serverShowModel) Init() tea.Cmd {
 			return tea.Batch(m.spinner.Tick, m.fetchServer())
 		}
 	}
+
+	// When server is already loaded (RunServerShowDirect), kick off metrics.
+	if !m.loading && m.server != nil && m.metricsLoading {
+		return tea.Batch(m.spinner.Tick, m.fetchMetrics())
+	}
 	return nil
 }
 
@@ -185,6 +257,27 @@ func (m serverShowModel) fetchServer() tea.Cmd {
 	}
 }
 
+func (m serverShowModel) fetchMetrics() tea.Cmd {
+	return func() tea.Msg {
+		mp, ok := m.provider.(domain.MetricsProvider)
+		if !ok {
+			return metricsErrorMsg{err: fmt.Errorf("provider does not support metrics")}
+		}
+
+		end := time.Now()
+		start := end.Add(-1 * time.Hour)
+		metrics, err := mp.GetServerMetrics(context.Background(), m.serverID, []domain.MetricType{
+			domain.MetricCPU,
+			domain.MetricDisk,
+			domain.MetricNetwork,
+		}, start, end)
+		if err != nil {
+			return metricsErrorMsg{err: err}
+		}
+		return metricsLoadedMsg{metrics: metrics}
+	}
+}
+
 // --- Update ---
 
 func (m serverShowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -192,10 +285,25 @@ func (m serverShowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// Viewport size is set dynamically in View() based on
+		// header/footer/status heights, so just store dimensions here.
 		return m, nil
 
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		model, cmd := m.handleKey(msg)
+		updated := model.(serverShowModel)
+		// Forward to viewport for scrolling in detail phase.
+		if updated.phase == showPhaseDetail && !updated.loading && updated.server != nil {
+			updated.viewport, _ = updated.viewport.Update(msg)
+		}
+		return updated, cmd
+
+	case tea.MouseMsg:
+		// Forward mouse events to viewport for scroll wheel in detail phase.
+		if m.phase == showPhaseDetail && !m.loading && m.server != nil {
+			m.viewport, _ = m.viewport.Update(msg)
+		}
+		return m, nil
 
 	case serversLoadedMsg:
 		m.loading = false
@@ -220,7 +328,11 @@ func (m serverShowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = ""
 			m.statusIsError = false
 		}
-		return m, nil
+		// Kick off async metrics fetch (non-blocking).
+		m.metricsLoading = true
+		m.metrics = nil
+		m.metricsErr = nil
+		return m, tea.Batch(m.spinner.Tick, m.fetchMetrics())
 
 	case serverDetailErrorMsg:
 		m.loading = false
@@ -258,8 +370,21 @@ func (m serverShowModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.poller, cmd, outcome = m.poller.HandlePollError(msg)
 		return m.applyToggleOutcome(outcome, cmd)
 
+	// --- Metrics lifecycle ---
+
+	case metricsLoadedMsg:
+		m.metricsLoading = false
+		m.metrics = msg.metrics
+		m.metricsErr = nil
+		return m, nil
+
+	case metricsErrorMsg:
+		m.metricsLoading = false
+		m.metricsErr = msg.err
+		return m, nil
+
 	case spinner.TickMsg:
-		needsSpinner := m.loading || (!m.embedded && m.poller.active)
+		needsSpinner := m.loading || m.metricsLoading || (!m.embedded && m.poller.active)
 		if needsSpinner {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
@@ -378,6 +503,10 @@ func (m serverShowModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.status = ""
 			m.statusIsError = false
+			m.metrics = nil
+			m.metricsLoading = false
+			m.metricsErr = nil
+			m.viewport.GotoTop()
 			return m, nil
 		}
 		if m.embedded {
@@ -435,6 +564,10 @@ func (m serverShowModel) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = nil
 			m.status = ""
 			m.statusIsError = false
+			m.metrics = nil
+			m.metricsLoading = false
+			m.metricsErr = nil
+			m.viewport.GotoTop()
 			return m, tea.Batch(m.spinner.Tick, m.fetchServer())
 		}
 
@@ -473,6 +606,7 @@ func (m serverShowModel) View() string {
 		}
 	case m.phase == showPhaseDetail:
 		bindings := []components.KeyBinding{
+			{Key: "j/k", Desc: "scroll"},
 			{Key: "s", Desc: "start/stop"},
 			{Key: "d", Desc: "delete"},
 			{Key: "r", Desc: "refresh"},
@@ -636,23 +770,53 @@ func (m serverShowModel) renderDetailPhase(height int) string {
 		)
 	}
 
-	return m.renderDetail(height)
+	// Render the full detail content (unconstrained by height).
+	detail := m.renderDetail()
+
+	// Use a local copy of the viewport for rendering. The persistent
+	// viewport (with YOffset) lives on the model and is updated in Update().
+	vp := m.viewport
+	vp.Width = m.width
+	vp.Height = height
+	vp.SetContent(detail)
+
+	return vp.View()
 }
 
-func (m serverShowModel) renderDetail(height int) string {
+func (m serverShowModel) renderDetail() string {
 	s := m.server
 
-	// Calculate card width (responsive, capped).
-	cardWidth := m.width - 8
-	if cardWidth > 72 {
-		cardWidth = 72
+	// Two-column layout: info on left, metrics on right.
+	// Horizontal padding of 2 on each side matches header/footer.
+	const hPad = 2
+	const columnGap = 2
+
+	// Usable width after horizontal padding on both sides.
+	usableWidth := m.width - (hPad * 2)
+	if usableWidth < 60 {
+		usableWidth = 60
 	}
-	if cardWidth < 30 {
-		cardWidth = 30
+
+	// Left column: ~45% of width, giving room for long values.
+	leftWidth := usableWidth * 45 / 100
+	if leftWidth > 52 {
+		leftWidth = 52
+	}
+	if leftWidth < 34 {
+		leftWidth = 34
+	}
+
+	// Right column gets the rest. Needs enough room for Y-axis labels + chart.
+	rightWidth := usableWidth - leftWidth - columnGap
+	if rightWidth < 36 {
+		rightWidth = 36
 	}
 
 	labelWidth := 14
-	valueWidth := cardWidth - labelWidth - 8 // padding + border
+	valueWidth := leftWidth - labelWidth - 8 // padding + border
+	if valueWidth < 6 {
+		valueWidth = 6
+	}
 
 	renderField := func(label, value string) string {
 		l := styles.Label.Width(labelWidth).Render(label)
@@ -693,30 +857,119 @@ func (m serverShowModel) renderDetail(height int) string {
 		networkFields = append(networkFields, renderField("Private IP", s.PrivateIPv4))
 	}
 
-	// Build sections.
-	sectionStyle := styles.Card.Width(cardWidth)
+	// Build left column (info cards).
+	leftStyle := styles.Card.Width(leftWidth)
 
-	sections := []string{
+	leftSections := []string{
 		titleLine,
 		"",
-		sectionStyle.Render(
+		leftStyle.Render(
 			styles.Subtitle.Render("Overview") + "\n\n" + overviewContent,
 		),
 	}
 
 	if len(networkFields) > 0 {
 		networkContent := strings.Join(networkFields, "\n")
-		sections = append(sections, sectionStyle.Render(
+		leftSections = append(leftSections, leftStyle.Render(
 			styles.Subtitle.Render("Network")+"\n\n"+networkContent,
 		))
 	}
 
-	detail := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	leftColumn := lipgloss.JoinVertical(lipgloss.Left, leftSections...)
 
-	// Center the detail card in available space.
-	return lipgloss.Place(
-		m.width, height,
-		lipgloss.Center, lipgloss.Center,
-		detail,
+	// Build right column (metrics).
+	rightStyle := styles.Card.Width(rightWidth)
+	rightColumn := m.renderMetricsSection(rightWidth, rightStyle)
+
+	// Join columns horizontally with a gap.
+	gap := strings.Repeat(" ", columnGap)
+	var detail string
+	if rightColumn != "" {
+		detail = lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, gap, rightColumn)
+	} else {
+		detail = leftColumn
+	}
+
+	// Pad left to align with header/footer.
+	return lipgloss.NewStyle().PaddingLeft(hPad).Render(detail)
+}
+
+// renderMetricsSection renders the metrics card with loading/error/chart states.
+func (m serverShowModel) renderMetricsSection(cardWidth int, sectionStyle lipgloss.Style) string {
+	if m.metricsLoading {
+		metricsContent := m.spinner.View() + "  Loading metrics…"
+		return sectionStyle.Render(
+			styles.Subtitle.Render("Metrics") + "\n\n" + styles.MutedText.Render(metricsContent),
+		)
+	}
+
+	if m.metricsErr != nil {
+		return sectionStyle.Render(
+			styles.Subtitle.Render("Metrics") + "\n\n" + styles.MutedText.Render("Failed to load metrics"),
+		)
+	}
+
+	if m.metrics == nil {
+		return ""
+	}
+
+	// Chart width = card inner content width.
+	// Card has Border(1 each side) + Padding(2 each side) = 6 horizontal overhead.
+	chartWidth := cardWidth - 6
+	if chartWidth < 20 {
+		chartWidth = 20
+	}
+
+	var charts []string
+
+	// CPU chart (single series, percentage).
+	cpuData := extractMetricValues(m.metrics, "cpu")
+	if len(cpuData) > 0 {
+		charts = append(charts, components.MetricsChart("CPU", cpuData, chartWidth, "%"))
+	}
+
+	// Disk IOPS chart (dual: read + write). Blue/Yellow.
+	diskRead := extractMetricValues(m.metrics, "disk.0.iops.read")
+	diskWrite := extractMetricValues(m.metrics, "disk.0.iops.write")
+	if len(diskRead) > 0 || len(diskWrite) > 0 {
+		charts = append(charts, components.MetricsDualChart(
+			"Disk IOPS", diskRead, diskWrite, "read", "write", chartWidth, "",
+			components.DualChartColors{Color1: styles.Blue, Color2: styles.Yellow},
+		))
+	}
+
+	// Network bandwidth chart (dual: in + out). Green/Red.
+	netIn := extractMetricValues(m.metrics, "network.0.bandwidth.in")
+	netOut := extractMetricValues(m.metrics, "network.0.bandwidth.out")
+	if len(netIn) > 0 || len(netOut) > 0 {
+		charts = append(charts, components.MetricsDualChart(
+			"Network", netIn, netOut, "in", "out", chartWidth, "B/s",
+			components.DualChartColors{Color1: styles.Green, Color2: styles.Red},
+		))
+	}
+
+	if len(charts) == 0 {
+		return sectionStyle.Render(
+			styles.Subtitle.Render("Metrics") + "\n\n" + styles.MutedText.Render("No metric data available"),
+		)
+	}
+
+	metricsContent := strings.Join(charts, "\n\n")
+	return sectionStyle.Render(
+		styles.Subtitle.Render("Metrics (last hour)") + "\n\n" + metricsContent,
 	)
+}
+
+// extractMetricValues extracts the float64 values from a named time series.
+func extractMetricValues(m *domain.ServerMetrics, key string) []float64 {
+	key = util.NormalizeKey(key)
+	ts, ok := m.TimeSeries[key]
+	if !ok {
+		return nil
+	}
+	vals := make([]float64, len(ts.Values))
+	for i, p := range ts.Values {
+		vals[i] = p.Value
+	}
+	return vals
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -838,14 +839,20 @@ func newServerShowDirect(provider domain.Provider, providerName string, server *
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(styles.Blue)
 
+	vp := viewport.New(0, 0)
+	vp.KeyMap = detailViewportKeyMap()
+
 	return serverShowModel{
-		provider:     provider,
-		providerName: providerName,
-		phase:        showPhaseDetail,
-		server:       server,
-		loading:      false,
-		spinner:      s,
-		embedded:     true,
+		provider:       provider,
+		providerName:   providerName,
+		phase:          showPhaseDetail,
+		server:         server,
+		serverID:       server.ID,
+		loading:        false,
+		metricsLoading: true,
+		spinner:        s,
+		embedded:       true,
+		viewport:       vp,
 	}
 }
 
