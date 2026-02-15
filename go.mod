@@ -16,6 +16,7 @@ require (
 	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/sync v0.19.0
 	golang.org/x/term v0.40.0
+	modernc.org/sqlite v1.45.0
 )
 
 require (
@@ -33,9 +34,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/hetznercloud/hcloud-go/v2 v2.36.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/lrstanley/bubblezone v0.0.0-20240914071701-b48c55a5e78e // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
@@ -65,5 +64,4 @@ require (
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.45.0 // indirect
 )
