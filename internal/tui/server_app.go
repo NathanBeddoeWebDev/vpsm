@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/tui/components"
@@ -118,23 +119,38 @@ func RunServerApp(provider domain.Provider, providerName string) (*AppResult, er
 	as.Spinner = spinner.Dot
 	as.Style = lipgloss.NewStyle().Foreground(styles.Blue)
 
+	overlay, overlayInitCmd := newOpsOverlay(provider, providerName)
+
 	m := serverAppModel{
 		provider:      provider,
 		providerName:  providerName,
 		view:          appViewList,
 		list:          newServerListModel(provider, providerName),
-		overlay:       newOpsOverlay(provider),
+		overlay:       overlay,
 		actionSpinner: as,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
+
+	// Send overlay initialization command if available (loads pending actions).
+	if overlayInitCmd != nil {
+		go func() {
+			p.Send(overlayInitCmd())
+		}()
+	}
+
 	result, err := p.Run()
 	if err != nil {
 		return nil, fmt.Errorf("failed to run server app: %w", err)
 	}
 
 	final := result.(serverAppModel)
-	_ = final
+
+	// Close database connection on exit.
+	if final.overlay.svc != nil {
+		final.overlay.svc.Close()
+	}
+
 	return &AppResult{}, nil
 }
 
@@ -220,11 +236,19 @@ func (m serverAppModel) updateOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if ev.Success {
 			switch m.view {
 			case appViewList:
-				cmds = append(cmds, m.list.fetchServers())
+				// Set loading state before triggering refresh to ensure
+				// footer renders correctly during the transition.
+				m.list.loading = true
+				m.list.err = nil
+				m.list.status = "" // Clear any previous status message
+				cmds = append(cmds, tea.Batch(m.list.spinner.Tick, m.list.fetchServers()))
 			case appViewShow:
 				if m.show.server != nil {
 					m.show.serverID = m.show.server.ID
-					cmds = append(cmds, m.show.fetchServer())
+					m.show.loading = true
+					m.show.err = nil
+					m.show.status = "" // Clear any previous status message
+					cmds = append(cmds, tea.Batch(m.show.spinner.Tick, m.show.fetchServer()))
 				}
 			}
 		}
@@ -310,7 +334,28 @@ func (m serverAppModel) View() string {
 		view = composeOverlay(view, overlayStr, m.width, m.height)
 	}
 
+	// Pad the view to exactly m.height lines so Bubbletea's alt screen
+	// renderer always repaints the full terminal. Without this, dismissing
+	// the overlay (which previously padded the output) leaves ghost lines
+	// from the prior frame.
+	view = padToHeight(view, m.width, m.height)
+
 	return view
+}
+
+// padToHeight ensures the view string has exactly `height` lines by
+// appending blank lines if necessary. This prevents ghost rendering
+// artifacts when the terminal's alt screen buffer retains content from
+// previous frames.
+func padToHeight(view string, width, height int) string {
+	if height <= 0 {
+		return view
+	}
+	lines := strings.Split(view, "\n")
+	for len(lines) < height {
+		lines = append(lines, strings.Repeat(" ", width))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // --- View transitions ---

@@ -6,7 +6,10 @@ import (
 	"os"
 	"os/signal"
 
+	"nathanbeddoewebdev/vpsm/internal/actionstore"
+	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/providers"
+	"nathanbeddoewebdev/vpsm/internal/services/action"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 
 	"github.com/spf13/cobra"
@@ -21,6 +24,9 @@ func StartCommand() *cobra.Command {
 
 The command waits for the operation to complete by polling the provider
 for action progress (or falling back to server-status polling).
+
+The action is persisted locally so that if the CLI is interrupted, the
+action can be resumed with "vpsm server actions --resume".
 
 Examples:
   vpsm server start --provider hetzner --id 12345`,
@@ -49,16 +55,30 @@ func runStart(cmd *cobra.Command, args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	action, err := provider.StartServer(ctx, serverID)
+	actionStatus, err := provider.StartServer(ctx, serverID)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error starting server: %v\n", err)
 		return
 	}
 
-	if err := waitForAction(ctx, provider, action, serverID, "running", cmd.ErrOrStderr()); err != nil {
+	// Open the action repository. If unavailable, repo is set to nil
+	// and the service degrades gracefully (no persistence, but operation continues).
+	repo, err := actionstore.Open()
+	if err != nil {
+		repo = nil
+	}
+	svc := action.NewService(provider, providerName, repo)
+	defer svc.Close()
+
+	// Persist the action so it can be resumed if the CLI is interrupted.
+	record := svc.TrackAction(serverID, "", actionStatus, "start_server", "running")
+
+	if err := svc.WaitForAction(ctx, actionStatus, serverID, "running", cmd.ErrOrStderr()); err != nil {
+		svc.FinalizeAction(record, domain.ActionStatusError, err.Error())
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 		return
 	}
 
+	svc.FinalizeAction(record, domain.ActionStatusSuccess, "")
 	fmt.Fprintf(cmd.OutOrStdout(), "Server %s started successfully.\n", serverID)
 }

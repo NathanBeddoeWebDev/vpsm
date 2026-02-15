@@ -17,6 +17,7 @@ func NewCommand() *cobra.Command {
 		Run:               runList,
 	}
 
+	cmd.AddCommand(ActionsCommand())
 	cmd.AddCommand(CreateCommand())
 	cmd.AddCommand(DeleteCommand())
 	cmd.AddCommand(ListCommand())
