@@ -1,6 +1,6 @@
 module nathanbeddoewebdev/vpsm
 
-go 1.25.1
+go 1.26.0
 
 require (
 	github.com/NimbleMarkets/ntcharts v0.4.0
