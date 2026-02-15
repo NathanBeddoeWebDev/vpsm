@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/signal"
 
+	"nathanbeddoewebdev/vpsm/internal/actionstore"
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/providers"
+	"nathanbeddoewebdev/vpsm/internal/services/action"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 
 	"github.com/spf13/cobra"
@@ -55,21 +57,30 @@ func runStop(cmd *cobra.Command, args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	action, err := provider.StopServer(ctx, serverID)
+	actionStatus, err := provider.StopServer(ctx, serverID)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error stopping server: %v\n", err)
 		return
 	}
 
-	// Persist the action so it can be resumed if the CLI is interrupted.
-	record := trackAction(providerName, serverID, action, "stop_server", "off")
+	// Open the action repository. If unavailable, repo is set to nil
+	// and the service degrades gracefully (no persistence, but operation continues).
+	repo, err := actionstore.Open()
+	if err != nil {
+		repo = nil
+	}
+	svc := action.NewService(provider, providerName, repo)
+	defer svc.Close()
 
-	if err := waitForAction(ctx, provider, action, serverID, "off", cmd.ErrOrStderr()); err != nil {
-		finalizeAction(record, domain.ActionStatusError, err.Error())
+	// Persist the action so it can be resumed if the CLI is interrupted.
+	record := svc.TrackAction(serverID, "", actionStatus, "stop_server", "off")
+
+	if err := svc.WaitForAction(ctx, actionStatus, serverID, "off", cmd.ErrOrStderr()); err != nil {
+		svc.FinalizeAction(record, domain.ActionStatusError, err.Error())
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error waiting for server to stop: %v\n", err)
 		return
 	}
 
-	finalizeAction(record, domain.ActionStatusSuccess, "")
+	svc.FinalizeAction(record, domain.ActionStatusSuccess, "")
 	fmt.Fprintf(cmd.OutOrStdout(), "Server %s stop initiated successfully.\n", serverID)
 }

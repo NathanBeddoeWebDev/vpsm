@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"time"
 
+	"nathanbeddoewebdev/vpsm/internal/actionstore"
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/providers"
+	"nathanbeddoewebdev/vpsm/internal/services/action"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
-	"nathanbeddoewebdev/vpsm/internal/store"
 
 	"github.com/spf13/cobra"
 )
@@ -55,77 +55,30 @@ func runStart(cmd *cobra.Command, args []string) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	action, err := provider.StartServer(ctx, serverID)
+	actionStatus, err := provider.StartServer(ctx, serverID)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error starting server: %v\n", err)
 		return
 	}
 
-	// Persist the action so it can be resumed if the CLI is interrupted.
-	record := trackAction(providerName, serverID, action, "start_server", "running")
+	// Open the action repository. If unavailable, repo is set to nil
+	// and the service degrades gracefully (no persistence, but operation continues).
+	repo, err := actionstore.Open()
+	if err != nil {
+		repo = nil
+	}
+	svc := action.NewService(provider, providerName, repo)
+	defer svc.Close()
 
-	if err := waitForAction(ctx, provider, action, serverID, "running", cmd.ErrOrStderr()); err != nil {
-		finalizeAction(record, domain.ActionStatusError, err.Error())
+	// Persist the action so it can be resumed if the CLI is interrupted.
+	record := svc.TrackAction(serverID, "", actionStatus, "start_server", "running")
+
+	if err := svc.WaitForAction(ctx, actionStatus, serverID, "running", cmd.ErrOrStderr()); err != nil {
+		svc.FinalizeAction(record, domain.ActionStatusError, err.Error())
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 		return
 	}
 
-	finalizeAction(record, domain.ActionStatusSuccess, "")
+	svc.FinalizeAction(record, domain.ActionStatusSuccess, "")
 	fmt.Fprintf(cmd.OutOrStdout(), "Server %s started successfully.\n", serverID)
-}
-
-// trackAction persists a new action record to the store. If the store
-// cannot be opened the action proceeds without persistence — the CLI
-// should not fail just because local tracking is unavailable.
-func trackAction(providerName, serverID string, action *domain.ActionStatus, command, targetStatus string) *store.ActionRecord {
-	if action == nil {
-		return nil
-	}
-
-	s, err := store.Open()
-	if err != nil {
-		return nil
-	}
-	defer s.Close()
-
-	record := &store.ActionRecord{
-		ActionID:     action.ID,
-		Provider:     providerName,
-		ServerID:     serverID,
-		Command:      command,
-		TargetStatus: targetStatus,
-		Status:       action.Status,
-		Progress:     action.Progress,
-		ErrorMessage: action.ErrorMessage,
-	}
-
-	if err := s.Save(record); err != nil {
-		return nil
-	}
-
-	// Opportunistically clean up old completed records.
-	s.DeleteOlderThan(24 * time.Hour)
-
-	return record
-}
-
-// finalizeAction updates a tracked action record with its terminal status.
-func finalizeAction(record *store.ActionRecord, status, errMsg string) {
-	if record == nil {
-		return
-	}
-
-	s, err := store.Open()
-	if err != nil {
-		return
-	}
-	defer s.Close()
-
-	record.Status = status
-	record.ErrorMessage = errMsg
-	if status == domain.ActionStatusSuccess {
-		record.Progress = 100
-	}
-
-	s.Save(record)
 }

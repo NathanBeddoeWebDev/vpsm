@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"nathanbeddoewebdev/vpsm/internal/actionstore"
 	"nathanbeddoewebdev/vpsm/internal/domain"
-	"nathanbeddoewebdev/vpsm/internal/store"
+	"nathanbeddoewebdev/vpsm/internal/services/action"
 	"nathanbeddoewebdev/vpsm/internal/tui/styles"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -148,7 +149,7 @@ type opsOverlay struct {
 	ops          []operation
 	nextID       int
 	spinner      spinner.Model
-	store        *store.SQLiteStore // database handle (may be nil if DB unavailable)
+	svc          *action.Service // persistence service (may be nil if DB unavailable)
 }
 
 // newOpsOverlay creates an overlay bound to the given provider and loads
@@ -160,17 +161,19 @@ func newOpsOverlay(provider domain.Provider, providerName string) (opsOverlay, t
 	s.Style = lipgloss.NewStyle().Foreground(styles.Blue)
 
 	// Open database connection (best-effort, continue if unavailable).
-	dbStore, err := store.Open()
+	repo, err := actionstore.Open()
 	if err != nil {
 		// Log error but continue without persistence.
-		dbStore = nil
+		repo = nil
 	}
+
+	svc := action.NewService(provider, providerName, repo)
 
 	o := opsOverlay{
 		provider:     provider,
 		providerName: providerName,
 		spinner:      s,
-		store:        dbStore,
+		svc:          svc,
 	}
 
 	// Load pending actions from database.
@@ -202,11 +205,11 @@ func (o opsOverlay) HasAny() bool {
 // polls each loaded action to check current status. Only loads actions
 // that are less than 5 minutes old to avoid showing stale operations.
 func (o *opsOverlay) loadPendingActions() tea.Cmd {
-	if o.store == nil {
+	if o.svc == nil {
 		return nil
 	}
 
-	records, err := o.store.ListPending()
+	records, err := o.svc.ListPending()
 	if err != nil || len(records) == 0 {
 		return nil
 	}
@@ -264,11 +267,11 @@ func (o *opsOverlay) loadPendingActions() tea.Cmd {
 // saveOp persists an operation to the database. Errors are logged but
 // don't fail the operation (TUI should continue if DB is unavailable).
 func (o *opsOverlay) saveOp(op operation) {
-	if o.store == nil {
+	if o.svc == nil {
 		return
 	}
 
-	record := &store.ActionRecord{
+	record := &actionstore.ActionRecord{
 		ID:           op.dbID, // 0 for new, or existing DB ID
 		ActionID:     op.actionID,
 		Provider:     o.providerName,
@@ -280,7 +283,7 @@ func (o *opsOverlay) saveOp(op operation) {
 		Progress:     op.progress,
 	}
 
-	if err := o.store.Save(record); err == nil {
+	if err := o.svc.SaveRecord(record); err == nil {
 		// Update the operation's DB ID if this was an insert.
 		if op.dbID == 0 {
 			op.dbID = record.ID

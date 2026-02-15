@@ -1,4 +1,4 @@
-// Package store provides persistent storage for in-flight provider actions.
+// Package actionstore provides persistent storage for in-flight provider actions.
 //
 // When a user starts or stops a server, the CLI tracks the action locally
 // so that if the process is interrupted (Ctrl+C, crash, etc.) the action
@@ -6,7 +6,7 @@
 //
 // Storage is backed by a SQLite database at ~/.config/vpsm/vpsm.db
 // (or the platform-equivalent path returned by os.UserConfigDir).
-package store
+package actionstore
 
 import (
 	"database/sql"
@@ -33,50 +33,8 @@ func SetPath(p string) { pathOverride = p }
 // ResetPath clears the path override. Intended for testing.
 func ResetPath() { pathOverride = "" }
 
-// ActionRecord represents a persisted action. It extends
-// domain.ActionStatus with metadata needed to resume polling
-// after a CLI restart.
-type ActionRecord struct {
-	// ID is the auto-increment primary key (assigned on insert).
-	ID int64
-
-	// ActionID is the provider-specific action identifier used for polling.
-	ActionID string
-
-	// Provider is the name of the cloud provider (e.g. "hetzner").
-	Provider string
-
-	// ServerID is the ID of the server being acted upon.
-	ServerID string
-
-	// ServerName is the human-readable server name (for display).
-	ServerName string
-
-	// Command describes the operation, e.g. "start_server", "stop_server".
-	Command string
-
-	// TargetStatus is the expected server status when the action completes
-	// (e.g. "running", "off").
-	TargetStatus string
-
-	// Status is the current state: "running", "success", or "error".
-	Status string
-
-	// Progress is a percentage (0–100).
-	Progress int
-
-	// ErrorMessage contains a human-readable explanation when Status is "error".
-	ErrorMessage string
-
-	// CreatedAt is when the action was first recorded.
-	CreatedAt time.Time
-
-	// UpdatedAt is the last time the record was modified.
-	UpdatedAt time.Time
-}
-
-// ActionStore defines the persistence interface for action records.
-type ActionStore interface {
+// ActionRepository defines the persistence interface for action records.
+type ActionRepository interface {
 	// Save inserts or updates an action record. On insert (ID == 0), an
 	// ID is assigned to the record.
 	Save(record *ActionRecord) error
@@ -100,8 +58,8 @@ type ActionStore interface {
 	Close() error
 }
 
-// SQLiteStore implements ActionStore backed by a local SQLite database.
-type SQLiteStore struct {
+// SQLiteRepository implements ActionRepository backed by a local SQLite database.
+type SQLiteRepository struct {
 	db *sql.DB
 }
 
@@ -112,13 +70,13 @@ func DefaultPath() (string, error) {
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("store: unable to determine config directory: %w", err)
+		return "", fmt.Errorf("actions: unable to determine config directory: %w", err)
 	}
 	return filepath.Join(base, appDir, dbFile), nil
 }
 
-// Open creates or opens the action store at the default path.
-func Open() (*SQLiteStore, error) {
+// Open creates or opens the action repository at the default path.
+func Open() (*SQLiteRepository, error) {
 	path, err := DefaultPath()
 	if err != nil {
 		return nil, err
@@ -128,34 +86,28 @@ func Open() (*SQLiteStore, error) {
 
 // OpenAt creates or opens a SQLite database at the given path.
 // The parent directory is created if it does not exist.
-func OpenAt(path string) (*SQLiteStore, error) {
+func OpenAt(path string) (*SQLiteRepository, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("store: failed to create directory %s: %w", dir, err)
+		return nil, fmt.Errorf("actions: failed to create directory %s: %w", dir, err)
 	}
 
 	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)")
 	if err != nil {
-		return nil, fmt.Errorf("store: failed to open database: %w", err)
+		return nil, fmt.Errorf("actions: failed to open database: %w", err)
 	}
 
-	s := &SQLiteStore{db: db}
-	if err := s.migrate(); err != nil {
+	r := &SQLiteRepository{db: db}
+	if err := r.migrate(); err != nil {
 		db.Close()
 		return nil, err
 	}
 
-	return s, nil
+	return r, nil
 }
 
 // migrate creates the actions table if it doesn't exist.
-//
-// The vpsm.db database may also contain these tables (currently unused):
-//   - provider_accounts: Multi-account provider credential storage (future feature)
-//   - server_cache: Local cache of server metadata for offline/fast access (future feature)
-//
-// These tables are preserved for future functionality.
-func (s *SQLiteStore) migrate() error {
+func (r *SQLiteRepository) migrate() error {
 	const ddl = `
 		CREATE TABLE IF NOT EXISTS actions (
 			id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,152 +125,152 @@ func (s *SQLiteStore) migrate() error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status);
 	`
-	if _, err := s.db.Exec(ddl); err != nil {
-		return fmt.Errorf("store: migration failed: %w", err)
+	if _, err := r.db.Exec(ddl); err != nil {
+		return fmt.Errorf("actions: migration failed: %w", err)
 	}
 	return nil
 }
 
 // Save inserts a new record (ID == 0) or updates an existing one.
-func (s *SQLiteStore) Save(r *ActionRecord) error {
-	r.UpdatedAt = time.Now().UTC()
+func (r *SQLiteRepository) Save(record *ActionRecord) error {
+	record.UpdatedAt = time.Now().UTC()
 
-	if r.ID == 0 {
+	if record.ID == 0 {
 		// Insert
-		if r.CreatedAt.IsZero() {
-			r.CreatedAt = r.UpdatedAt
+		if record.CreatedAt.IsZero() {
+			record.CreatedAt = record.UpdatedAt
 		}
-		result, err := s.db.Exec(`
+		result, err := r.db.Exec(`
 			INSERT INTO actions (action_id, provider, server_id, server_name, command, target_status, status, progress, error_message, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			r.ActionID, r.Provider, r.ServerID, r.ServerName, r.Command,
-			r.TargetStatus, r.Status, r.Progress, r.ErrorMessage,
-			r.CreatedAt.Format(time.RFC3339Nano), r.UpdatedAt.Format(time.RFC3339Nano),
+			record.ActionID, record.Provider, record.ServerID, record.ServerName, record.Command,
+			record.TargetStatus, record.Status, record.Progress, record.ErrorMessage,
+			record.CreatedAt.Format(time.RFC3339Nano), record.UpdatedAt.Format(time.RFC3339Nano),
 		)
 		if err != nil {
-			return fmt.Errorf("store: insert failed: %w", err)
+			return fmt.Errorf("actions: insert failed: %w", err)
 		}
 		id, err := result.LastInsertId()
 		if err != nil {
-			return fmt.Errorf("store: failed to get last insert ID: %w", err)
+			return fmt.Errorf("actions: failed to get last insert ID: %w", err)
 		}
-		r.ID = id
+		record.ID = id
 		return nil
 	}
 
 	// Update
-	result, err := s.db.Exec(`
+	result, err := r.db.Exec(`
 		UPDATE actions SET action_id=?, provider=?, server_id=?, server_name=?,
 		       command=?, target_status=?, status=?, progress=?, error_message=?,
 		       updated_at=?
 		WHERE id=?`,
-		r.ActionID, r.Provider, r.ServerID, r.ServerName, r.Command,
-		r.TargetStatus, r.Status, r.Progress, r.ErrorMessage,
-		r.UpdatedAt.Format(time.RFC3339Nano), r.ID,
+		record.ActionID, record.Provider, record.ServerID, record.ServerName, record.Command,
+		record.TargetStatus, record.Status, record.Progress, record.ErrorMessage,
+		record.UpdatedAt.Format(time.RFC3339Nano), record.ID,
 	)
 	if err != nil {
-		return fmt.Errorf("store: update failed: %w", err)
+		return fmt.Errorf("actions: update failed: %w", err)
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("store: action with ID %d not found", r.ID)
+		return fmt.Errorf("actions: action with ID %d not found", record.ID)
 	}
 	return nil
 }
 
 // Get retrieves a single action record by ID.
-func (s *SQLiteStore) Get(id int64) (*ActionRecord, error) {
-	row := s.db.QueryRow(`
+func (r *SQLiteRepository) Get(id int64) (*ActionRecord, error) {
+	row := r.db.QueryRow(`
 		SELECT id, action_id, provider, server_id, server_name, command,
 		       target_status, status, progress, error_message, created_at, updated_at
 		FROM actions WHERE id = ?`, id)
 
-	r, err := scanRow(row)
+	record, err := scanRow(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("store: query failed: %w", err)
+		return nil, fmt.Errorf("actions: query failed: %w", err)
 	}
-	return r, nil
+	return record, nil
 }
 
 // ListPending returns all action records with status "running".
-func (s *SQLiteStore) ListPending() ([]ActionRecord, error) {
-	rows, err := s.db.Query(`
+func (r *SQLiteRepository) ListPending() ([]ActionRecord, error) {
+	rows, err := r.db.Query(`
 		SELECT id, action_id, provider, server_id, server_name, command,
 		       target_status, status, progress, error_message, created_at, updated_at
 		FROM actions WHERE status = 'running' ORDER BY created_at DESC`)
 	if err != nil {
-		return nil, fmt.Errorf("store: query failed: %w", err)
+		return nil, fmt.Errorf("actions: query failed: %w", err)
 	}
 	defer rows.Close()
 	return scanRows(rows)
 }
 
 // ListRecent returns the most recent n action records regardless of status.
-func (s *SQLiteStore) ListRecent(n int) ([]ActionRecord, error) {
-	rows, err := s.db.Query(`
+func (r *SQLiteRepository) ListRecent(n int) ([]ActionRecord, error) {
+	rows, err := r.db.Query(`
 		SELECT id, action_id, provider, server_id, server_name, command,
 		       target_status, status, progress, error_message, created_at, updated_at
 		FROM actions ORDER BY created_at DESC LIMIT ?`, n)
 	if err != nil {
-		return nil, fmt.Errorf("store: query failed: %w", err)
+		return nil, fmt.Errorf("actions: query failed: %w", err)
 	}
 	defer rows.Close()
 	return scanRows(rows)
 }
 
 // DeleteOlderThan removes completed/errored records older than d.
-func (s *SQLiteStore) DeleteOlderThan(d time.Duration) (int64, error) {
+func (r *SQLiteRepository) DeleteOlderThan(d time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-d).Format(time.RFC3339Nano)
-	result, err := s.db.Exec(`
+	result, err := r.db.Exec(`
 		DELETE FROM actions WHERE status != 'running' AND updated_at < ?`, cutoff)
 	if err != nil {
-		return 0, fmt.Errorf("store: delete failed: %w", err)
+		return 0, fmt.Errorf("actions: delete failed: %w", err)
 	}
 	return result.RowsAffected()
 }
 
 // Close releases database resources.
-func (s *SQLiteStore) Close() error {
-	return s.db.Close()
+func (r *SQLiteRepository) Close() error {
+	return r.db.Close()
 }
 
 // scanRow scans a single row into an ActionRecord.
 func scanRow(row *sql.Row) (*ActionRecord, error) {
-	var r ActionRecord
+	var record ActionRecord
 	var createdStr, updatedStr string
 	err := row.Scan(
-		&r.ID, &r.ActionID, &r.Provider, &r.ServerID, &r.ServerName,
-		&r.Command, &r.TargetStatus, &r.Status, &r.Progress, &r.ErrorMessage,
+		&record.ID, &record.ActionID, &record.Provider, &record.ServerID, &record.ServerName,
+		&record.Command, &record.TargetStatus, &record.Status, &record.Progress, &record.ErrorMessage,
 		&createdStr, &updatedStr,
 	)
 	if err != nil {
 		return nil, err
 	}
-	r.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdStr)
-	r.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedStr)
-	return &r, nil
+	record.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdStr)
+	record.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedStr)
+	return &record, nil
 }
 
 // scanRows scans multiple rows into ActionRecords.
 func scanRows(rows *sql.Rows) ([]ActionRecord, error) {
 	var records []ActionRecord
 	for rows.Next() {
-		var r ActionRecord
+		var record ActionRecord
 		var createdStr, updatedStr string
 		err := rows.Scan(
-			&r.ID, &r.ActionID, &r.Provider, &r.ServerID, &r.ServerName,
-			&r.Command, &r.TargetStatus, &r.Status, &r.Progress, &r.ErrorMessage,
+			&record.ID, &record.ActionID, &record.Provider, &record.ServerID, &record.ServerName,
+			&record.Command, &record.TargetStatus, &record.Status, &record.Progress, &record.ErrorMessage,
 			&createdStr, &updatedStr,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("store: scan failed: %w", err)
+			return nil, fmt.Errorf("actions: scan failed: %w", err)
 		}
-		r.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdStr)
-		r.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedStr)
-		records = append(records, r)
+		record.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdStr)
+		record.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedStr)
+		records = append(records, record)
 	}
 	return records, rows.Err()
 }

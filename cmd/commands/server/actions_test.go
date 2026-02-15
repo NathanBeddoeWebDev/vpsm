@@ -6,20 +6,20 @@ import (
 	"strings"
 	"testing"
 
+	"nathanbeddoewebdev/vpsm/internal/actionstore"
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
-	"nathanbeddoewebdev/vpsm/internal/store"
 )
 
 // withTestStore sets up a temporary SQLite store for testing.
-func withTestStore(t *testing.T) *store.SQLiteStore {
+func withTestStore(t *testing.T) *actionstore.SQLiteRepository {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "vpsm.db")
-	store.SetPath(path)
-	t.Cleanup(func() { store.ResetPath() })
-	s, err := store.OpenAt(path)
+	actionstore.SetPath(path)
+	t.Cleanup(func() { actionstore.ResetPath() })
+	s, err := actionstore.OpenAt(path)
 	if err != nil {
 		t.Fatalf("OpenAt failed: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestActionsCommand_ShowsPending(t *testing.T) {
 	registerStartMockProvider(t, "mock", mock)
 
 	// Insert a pending action.
-	r := &store.ActionRecord{
+	r := &actionstore.ActionRecord{
 		ActionID:     "act-1",
 		Provider:     "mock",
 		ServerID:     "42",
@@ -92,7 +92,7 @@ func TestActionsCommand_ShowsAll(t *testing.T) {
 	registerStartMockProvider(t, "mock", mock)
 
 	// Insert a completed action.
-	r := &store.ActionRecord{
+	r := &actionstore.ActionRecord{
 		ActionID:     "act-1",
 		Provider:     "mock",
 		ServerID:     "42",
@@ -153,7 +153,7 @@ func TestActionsCommand_ResumeSuccess(t *testing.T) {
 	})
 
 	// Insert a pending action.
-	r := &store.ActionRecord{
+	r := &actionstore.ActionRecord{
 		ActionID:     "act-1",
 		Provider:     "mock",
 		ServerID:     "42",

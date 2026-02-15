@@ -145,8 +145,8 @@ func RunServerApp(provider domain.Provider, providerName string) (*AppResult, er
 	final := result.(serverAppModel)
 
 	// Close database connection on exit.
-	if final.overlay.store != nil {
-		final.overlay.store.Close()
+	if final.overlay.svc != nil {
+		final.overlay.svc.Close()
 	}
 
 	return &AppResult{}, nil

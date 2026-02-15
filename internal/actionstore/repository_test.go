@@ -1,4 +1,4 @@
-package store
+package actionstore
 
 import (
 	"os"
@@ -7,22 +7,22 @@ import (
 	"time"
 )
 
-func tempStore(t *testing.T) *SQLiteStore {
+func tempRepo(t *testing.T) *SQLiteRepository {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "vpsm.db")
-	s, err := OpenAt(path)
+	r, err := OpenAt(path)
 	if err != nil {
 		t.Fatalf("OpenAt failed: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
-	return s
+	t.Cleanup(func() { r.Close() })
+	return r
 }
 
 func TestSave_Insert(t *testing.T) {
-	s := tempStore(t)
+	r := tempRepo(t)
 
-	r := &ActionRecord{
+	record := &ActionRecord{
 		ActionID:     "act-1",
 		Provider:     "hetzner",
 		ServerID:     "42",
@@ -32,25 +32,25 @@ func TestSave_Insert(t *testing.T) {
 		Status:       "running",
 	}
 
-	if err := s.Save(r); err != nil {
+	if err := r.Save(record); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	if r.ID == 0 {
+	if record.ID == 0 {
 		t.Error("expected ID to be assigned after insert")
 	}
-	if r.CreatedAt.IsZero() {
+	if record.CreatedAt.IsZero() {
 		t.Error("expected CreatedAt to be set")
 	}
-	if r.UpdatedAt.IsZero() {
+	if record.UpdatedAt.IsZero() {
 		t.Error("expected UpdatedAt to be set")
 	}
 }
 
 func TestSave_Update(t *testing.T) {
-	s := tempStore(t)
+	r := tempRepo(t)
 
-	r := &ActionRecord{
+	record := &ActionRecord{
 		ActionID:     "act-1",
 		Provider:     "hetzner",
 		ServerID:     "42",
@@ -59,17 +59,17 @@ func TestSave_Update(t *testing.T) {
 		Status:       "running",
 	}
 
-	if err := s.Save(r); err != nil {
+	if err := r.Save(record); err != nil {
 		t.Fatalf("insert failed: %v", err)
 	}
 
-	r.Status = "success"
-	r.Progress = 100
-	if err := s.Save(r); err != nil {
+	record.Status = "success"
+	record.Progress = 100
+	if err := r.Save(record); err != nil {
 		t.Fatalf("update failed: %v", err)
 	}
 
-	got, err := s.Get(r.ID)
+	got, err := r.Get(record.ID)
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
@@ -82,19 +82,19 @@ func TestSave_Update(t *testing.T) {
 }
 
 func TestSave_UpdateNotFound(t *testing.T) {
-	s := tempStore(t)
+	r := tempRepo(t)
 
-	r := &ActionRecord{ID: 999, Status: "running"}
-	err := s.Save(r)
+	record := &ActionRecord{ID: 999, Status: "running"}
+	err := r.Save(record)
 	if err == nil {
 		t.Fatal("expected error updating non-existent record")
 	}
 }
 
 func TestGet_NotFound(t *testing.T) {
-	s := tempStore(t)
+	r := tempRepo(t)
 
-	got, err := s.Get(999)
+	got, err := r.Get(999)
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
@@ -104,17 +104,17 @@ func TestGet_NotFound(t *testing.T) {
 }
 
 func TestGet_Found(t *testing.T) {
-	s := tempStore(t)
+	r := tempRepo(t)
 
-	r := &ActionRecord{
+	record := &ActionRecord{
 		ActionID: "act-1",
 		Provider: "hetzner",
 		ServerID: "42",
 		Status:   "running",
 	}
-	s.Save(r)
+	r.Save(record)
 
-	got, err := s.Get(r.ID)
+	got, err := r.Get(record.ID)
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
@@ -127,46 +127,46 @@ func TestGet_Found(t *testing.T) {
 }
 
 func TestListPending(t *testing.T) {
-	s := tempStore(t)
+	r := tempRepo(t)
 
 	// Insert mix of running and completed actions.
 	for _, status := range []string{"running", "success", "running", "error"} {
-		r := &ActionRecord{
+		record := &ActionRecord{
 			Provider: "hetzner",
 			ServerID: "42",
 			Status:   status,
 		}
-		s.Save(r)
+		r.Save(record)
 	}
 
-	pending, err := s.ListPending()
+	pending, err := r.ListPending()
 	if err != nil {
 		t.Fatalf("ListPending failed: %v", err)
 	}
 	if len(pending) != 2 {
 		t.Fatalf("expected 2 pending actions, got %d", len(pending))
 	}
-	for _, r := range pending {
-		if r.Status != "running" {
-			t.Errorf("expected status 'running', got %q", r.Status)
+	for _, record := range pending {
+		if record.Status != "running" {
+			t.Errorf("expected status 'running', got %q", record.Status)
 		}
 	}
 }
 
 func TestListRecent(t *testing.T) {
-	s := tempStore(t)
+	r := tempRepo(t)
 
 	for i := 0; i < 5; i++ {
-		r := &ActionRecord{
+		record := &ActionRecord{
 			Provider:  "hetzner",
 			ServerID:  "42",
 			Status:    "success",
 			CreatedAt: time.Now().UTC().Add(time.Duration(i) * time.Second),
 		}
-		s.Save(r)
+		r.Save(record)
 	}
 
-	recent, err := s.ListRecent(3)
+	recent, err := r.ListRecent(3)
 	if err != nil {
 		t.Fatalf("ListRecent failed: %v", err)
 	}
@@ -182,14 +182,14 @@ func TestListRecent(t *testing.T) {
 }
 
 func TestListRecent_All(t *testing.T) {
-	s := tempStore(t)
+	r := tempRepo(t)
 
 	for i := 0; i < 3; i++ {
-		s.Save(&ActionRecord{Provider: "hetzner", ServerID: "42", Status: "success"})
+		r.Save(&ActionRecord{Provider: "hetzner", ServerID: "42", Status: "success"})
 	}
 
 	// Request more than available.
-	recent, err := s.ListRecent(10)
+	recent, err := r.ListRecent(10)
 	if err != nil {
 		t.Fatalf("ListRecent failed: %v", err)
 	}
@@ -199,24 +199,24 @@ func TestListRecent_All(t *testing.T) {
 }
 
 func TestDeleteOlderThan(t *testing.T) {
-	s := tempStore(t)
+	r := tempRepo(t)
 
 	recent := &ActionRecord{
 		Provider: "hetzner",
 		ServerID: "43",
 		Status:   "running",
 	}
-	s.Save(recent)
+	r.Save(recent)
 
 	completed := &ActionRecord{
 		Provider: "hetzner",
 		ServerID: "44",
 		Status:   "success",
 	}
-	s.Save(completed)
+	r.Save(completed)
 
 	// Nothing should be deleted since everything is recent.
-	removed, err := s.DeleteOlderThan(24 * time.Hour)
+	removed, err := r.DeleteOlderThan(24 * time.Hour)
 	if err != nil {
 		t.Fatalf("DeleteOlderThan failed: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestDeleteOlderThan(t *testing.T) {
 	}
 
 	// Delete everything older than 0 (all completed).
-	removed, err = s.DeleteOlderThan(0)
+	removed, err = r.DeleteOlderThan(0)
 	if err != nil {
 		t.Fatalf("DeleteOlderThan failed: %v", err)
 	}
@@ -234,40 +234,40 @@ func TestDeleteOlderThan(t *testing.T) {
 	}
 
 	// Running action should still be there.
-	pending, _ := s.ListPending()
+	pending, _ := r.ListPending()
 	if len(pending) != 1 {
 		t.Errorf("expected 1 pending action remaining, got %d", len(pending))
 	}
 }
 
-func TestSQLiteStore_Persistence(t *testing.T) {
+func TestSQLiteRepository_Persistence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "vpsm.db")
 
-	// Write with one store instance.
-	s1, err := OpenAt(path)
+	// Write with one repository instance.
+	r1, err := OpenAt(path)
 	if err != nil {
 		t.Fatalf("OpenAt failed: %v", err)
 	}
-	r := &ActionRecord{
+	record := &ActionRecord{
 		ActionID: "act-1",
 		Provider: "hetzner",
 		ServerID: "42",
 		Status:   "running",
 	}
-	if err := s1.Save(r); err != nil {
+	if err := r1.Save(record); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
-	s1.Close()
+	r1.Close()
 
-	// Read with a new store instance.
-	s2, err := OpenAt(path)
+	// Read with a new repository instance.
+	r2, err := OpenAt(path)
 	if err != nil {
 		t.Fatalf("OpenAt failed: %v", err)
 	}
-	defer s2.Close()
+	defer r2.Close()
 
-	got, err := s2.Get(r.ID)
+	got, err := r2.Get(record.ID)
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
@@ -279,29 +279,29 @@ func TestSQLiteStore_Persistence(t *testing.T) {
 	}
 }
 
-func TestSQLiteStore_EmptyDB(t *testing.T) {
-	s := tempStore(t)
+func TestSQLiteRepository_EmptyDB(t *testing.T) {
+	r := tempRepo(t)
 
-	pending, err := s.ListPending()
+	pending, err := r.ListPending()
 	if err != nil {
-		t.Fatalf("ListPending on empty store failed: %v", err)
+		t.Fatalf("ListPending on empty repo failed: %v", err)
 	}
 	if len(pending) != 0 {
-		t.Errorf("expected 0 pending on empty store, got %d", len(pending))
+		t.Errorf("expected 0 pending on empty repo, got %d", len(pending))
 	}
 }
 
-func TestSQLiteStore_CreatesDirectory(t *testing.T) {
+func TestSQLiteRepository_CreatesDirectory(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "dir", "vpsm.db")
-	s, err := OpenAt(path)
+	r, err := OpenAt(path)
 	if err != nil {
 		t.Fatalf("OpenAt failed to create nested directory: %v", err)
 	}
-	defer s.Close()
+	defer r.Close()
 
-	r := &ActionRecord{Provider: "hetzner", ServerID: "42", Status: "running"}
-	if err := s.Save(r); err != nil {
+	record := &ActionRecord{Provider: "hetzner", ServerID: "42", Status: "running"}
+	if err := r.Save(record); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
