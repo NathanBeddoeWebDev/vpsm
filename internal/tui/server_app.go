@@ -1,11 +1,17 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"os/exec"
 	"strings"
 
 	"nathanbeddoewebdev/vpsm/internal/domain"
+	"nathanbeddoewebdev/vpsm/internal/serverprefs"
+	prefssvc "nathanbeddoewebdev/vpsm/internal/services/serverprefs"
 	"nathanbeddoewebdev/vpsm/internal/tui/components"
 	"nathanbeddoewebdev/vpsm/internal/tui/styles"
 
@@ -31,6 +37,10 @@ type navigateToDeleteMsg struct {
 }
 
 type navigateToCreateMsg struct{}
+
+type navigateToSSHMsg struct {
+	server domain.Server
+}
 
 // navigateBackMsg asks the app to return to the previous view (or the list).
 type navigateBackMsg struct{}
@@ -60,6 +70,41 @@ type createResultMsg struct {
 	err    error
 }
 
+// --- SSH messages ---
+
+// requestSSHMsg is emitted by the show model when the user confirms SSH.
+type requestSSHMsg struct {
+	server    domain.Server
+	username  string
+	ipAddress string
+}
+
+// sshErrKind categorizes SSH connection failures for appropriate error handling.
+type sshErrKind int
+
+const (
+	sshErrNone sshErrKind = iota
+	sshErrHostKeyConflict
+	sshErrGeneric
+)
+
+// sshFinishedMsg is returned by the tea.ExecProcess callback.
+type sshFinishedMsg struct {
+	server    domain.Server
+	username  string // carried forward for retry
+	ipAddress string // carried forward for retry
+	err       error
+	errKind   sshErrKind
+	errDetail string // human-readable message extracted from SSH stderr
+}
+
+// clearHostKeyMsg requests removal of a stale SSH host key and connection retry.
+type clearHostKeyMsg struct {
+	server    domain.Server
+	username  string
+	ipAddress string
+}
+
 // --- App view ---
 
 type appView int
@@ -69,6 +114,7 @@ const (
 	appViewShow
 	appViewDelete
 	appViewCreate
+	appViewSSH
 	appViewAction // performing an API call (delete/create)
 )
 
@@ -89,10 +135,14 @@ type serverAppModel struct {
 	show   serverShowModel
 	delete serverDeleteModel
 	create serverCreateModel
+	ssh    serverSSHModel
 
 	// overlay manages concurrent start/stop operations and renders a
 	// floating panel in the bottom-right corner of the screen.
 	overlay opsOverlay
+
+	// prefsSvc provides per-server user preference persistence.
+	prefsSvc *prefssvc.Service
 
 	// Action state (appViewAction).
 	actionSpinner spinner.Model
@@ -120,12 +170,19 @@ func RunServerApp(provider domain.Provider, providerName string) (*AppResult, er
 
 	overlay, overlayInitCmd := newOpsOverlay(provider, providerName)
 
+	// Open preferences database (best-effort, continue if unavailable).
+	var prefsSvc *prefssvc.Service
+	if repo, err := serverprefs.Open(); err == nil {
+		prefsSvc = prefssvc.NewService(repo)
+	}
+
 	m := serverAppModel{
 		provider:      provider,
 		providerName:  providerName,
 		view:          appViewList,
 		list:          newServerListModel(provider, providerName),
 		overlay:       overlay,
+		prefsSvc:      prefsSvc,
 		actionSpinner: as,
 	}
 
@@ -145,9 +202,12 @@ func RunServerApp(provider domain.Provider, providerName string) (*AppResult, er
 
 	final := result.(serverAppModel)
 
-	// Close database connection on exit.
+	// Close database connections on exit.
 	if final.overlay.svc != nil {
 		final.overlay.svc.Close()
+	}
+	if final.prefsSvc != nil {
+		final.prefsSvc.Close()
 	}
 
 	return &AppResult{}, nil
@@ -179,6 +239,9 @@ func (m serverAppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case navigateToCreateMsg:
 		return m.switchToCreate()
 
+	case navigateToSSHMsg:
+		return m.switchToSSH(msg.server)
+
 	case navigateBackMsg:
 		return m.switchToList()
 
@@ -208,6 +271,17 @@ func (m serverAppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case opToggleInitiatedMsg, opToggleErrorMsg, opPollTickMsg,
 		opPollResultMsg, opPollErrorMsg, opDismissMsg:
 		return m.updateOverlay(msg)
+
+	// --- SSH exec ---
+
+	case requestSSHMsg:
+		return m.handleSSHRequest(msg)
+
+	case sshFinishedMsg:
+		return m.handleSSHFinished(msg)
+
+	case clearHostKeyMsg:
+		return m.handleClearHostKey(msg)
 
 	// --- Spinner ticks ---
 	// Forward to both the overlay and the active child so both
@@ -299,6 +373,10 @@ func (m serverAppModel) updateChildDirect(msg tea.Msg) (serverAppModel, tea.Cmd)
 		updated, cmd := m.create.Update(msg)
 		m.create = updated.(serverCreateModel)
 		return m, cmd
+	case appViewSSH:
+		updated, cmd := m.ssh.Update(msg)
+		m.ssh = updated.(serverSSHModel)
+		return m, cmd
 	case appViewAction:
 		return m.updateActionDirect(msg)
 	}
@@ -323,6 +401,8 @@ func (m serverAppModel) View() string {
 		view = m.delete.View()
 	case appViewCreate:
 		view = m.create.View()
+	case appViewSSH:
+		view = m.ssh.View()
 	case appViewAction:
 		view = m.renderAction()
 	}
@@ -400,6 +480,33 @@ func (m serverAppModel) switchToCreate() (tea.Model, tea.Cmd) {
 	return m, m.create.Init()
 }
 
+func (m serverAppModel) switchToSSH(server domain.Server) (tea.Model, tea.Cmd) {
+	// Resolve IP address (IPv4 preferred, IPv6 fallback).
+	ipAddress := server.PublicIPv4
+	if ipAddress == "" {
+		ipAddress = server.PublicIPv6
+	}
+	if ipAddress == "" {
+		// No IP available — return to show with error.
+		m.view = appViewShow
+		m.show.status = "No public IP address available for SSH"
+		m.show.statusIsError = true
+		return m, nil
+	}
+
+	// Load saved username if available.
+	var defaultUsername string
+	if m.prefsSvc != nil {
+		defaultUsername = m.prefsSvc.GetSSHUser(m.providerName, server.ID)
+	}
+
+	m.view = appViewSSH
+	m.ssh = newServerSSHModel(&server, m.providerName, ipAddress, defaultUsername)
+	m.ssh.width = m.width
+	m.ssh.height = m.height
+	return m, m.ssh.Init()
+}
+
 // --- API actions ---
 
 func (m serverAppModel) startDeleteAction(server domain.Server) (tea.Model, tea.Cmd) {
@@ -442,7 +549,7 @@ func (m serverAppModel) handleDeleteResult(msg deleteResultMsg) (tea.Model, tea.
 	m.list = newServerListModel(m.provider, m.providerName)
 	m.list.width = m.width
 	m.list.height = m.height
-	m.list.toggleResult = fmt.Sprintf("Server %q deleted successfully", msg.server.Name)
+	m.list.persistentStatus = fmt.Sprintf("Server %q deleted successfully", msg.server.Name)
 	return m, m.list.Init()
 }
 
@@ -464,8 +571,150 @@ func (m serverAppModel) handleCreateResult(msg createResultMsg) (tea.Model, tea.
 	if msg.server != nil {
 		name = fmt.Sprintf("%q", msg.server.Name)
 	}
-	m.list.toggleResult = fmt.Sprintf("Server %s created successfully", name)
+	m.list.persistentStatus = fmt.Sprintf("Server %s created successfully", name)
 	return m, m.list.Init()
+}
+
+// --- SSH handlers ---
+
+func (m serverAppModel) handleSSHRequest(msg requestSSHMsg) (tea.Model, tea.Cmd) {
+	// Persist username for this server.
+	if m.prefsSvc != nil {
+		m.prefsSvc.SetSSHUser(m.providerName, msg.server.ID, msg.username)
+	}
+
+	// Build SSH command with secure options.
+	sshCmd := exec.Command("ssh",
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "ConnectTimeout=10",
+		"-o", "ServerAliveInterval=60",
+		"-o", "ServerAliveCountMax=3",
+		fmt.Sprintf("%s@%s", msg.username, msg.ipAddress),
+	)
+	sshCmd.Stdin = os.Stdin
+	sshCmd.Stdout = os.Stdout
+
+	// Capture stderr for error detection while also showing it to the user.
+	var stderrBuf bytes.Buffer
+	sshCmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+
+	// Capture context for navigation and error handling after SSH exits.
+	server := msg.server
+	username := msg.username
+	ipAddress := msg.ipAddress
+
+	return m, tea.ExecProcess(sshCmd, func(err error) tea.Msg {
+		if err == nil {
+			// SSH succeeded — no error to report.
+			return sshFinishedMsg{
+				server:    server,
+				username:  username,
+				ipAddress: ipAddress,
+				err:       nil,
+				errKind:   sshErrNone,
+			}
+		}
+
+		// SSH failed — inspect stderr to categorize the failure.
+		stderrOutput := stderrBuf.String()
+		errKind := sshErrGeneric
+		errDetail := "SSH connection failed"
+
+		if strings.Contains(stderrOutput, "REMOTE HOST IDENTIFICATION HAS CHANGED") {
+			errKind = sshErrHostKeyConflict
+			errDetail = "Host key has changed (IP may have been reused by a new server)"
+		} else if strings.Contains(stderrOutput, "Connection refused") {
+			errDetail = "Connection refused (server may not be running SSH)"
+		} else if strings.Contains(stderrOutput, "Connection timed out") || strings.Contains(stderrOutput, "No route to host") {
+			errDetail = "Connection timed out (network issue or firewall blocking access)"
+		} else if strings.Contains(stderrOutput, "Permission denied") {
+			errDetail = "Permission denied (check username and SSH keys)"
+		}
+
+		return sshFinishedMsg{
+			server:    server,
+			username:  username,
+			ipAddress: ipAddress,
+			err:       err,
+			errKind:   errKind,
+			errDetail: errDetail,
+		}
+	})
+}
+
+func (m serverAppModel) handleSSHFinished(msg sshFinishedMsg) (tea.Model, tea.Cmd) {
+	if msg.err == nil {
+		// SSH succeeded — navigate back to show view with refresh.
+		m.view = appViewShow
+		m.show = newServerShowDirect(m.provider, m.providerName, &msg.server)
+		m.show.width = m.width
+		m.show.height = m.height
+		m.show.loading = true
+		m.show.serverID = msg.server.ID
+		m.show.err = nil
+		return m, tea.Batch(m.show.spinner.Tick, m.show.fetchServer())
+	}
+
+	// SSH failed — branch on error kind.
+	switch msg.errKind {
+	case sshErrHostKeyConflict:
+		// Host key conflict — return to SSH view with error + retry option.
+		m.view = appViewSSH
+		m.ssh = newServerSSHModelWithError(
+			&msg.server,
+			m.providerName,
+			msg.ipAddress,
+			msg.username,
+			msg.errDetail,
+			true, // hostKeyConflict
+		)
+		m.ssh.width = m.width
+		m.ssh.height = m.height
+		return m, m.ssh.Init()
+
+	default:
+		// Generic SSH error — navigate to show view with persistent error status.
+		m.view = appViewShow
+		m.show = newServerShowDirect(m.provider, m.providerName, &msg.server)
+		m.show.width = m.width
+		m.show.height = m.height
+		m.show.persistentStatus = msg.errDetail
+		m.show.statusIsError = true
+		m.show.loading = true
+		m.show.serverID = msg.server.ID
+		m.show.err = nil
+		return m, tea.Batch(m.show.spinner.Tick, m.show.fetchServer())
+	}
+}
+
+func (m serverAppModel) handleClearHostKey(msg clearHostKeyMsg) (tea.Model, tea.Cmd) {
+	// Remove the stale SSH host key for this IP address.
+	cmd := exec.Command("ssh-keygen", "-R", msg.ipAddress)
+	// Run synchronously (fast operation).
+	if err := cmd.Run(); err != nil {
+		// If ssh-keygen fails, show error and return to SSH view without retry.
+		m.view = appViewSSH
+		m.ssh = newServerSSHModelWithError(
+			&msg.server,
+			m.providerName,
+			msg.ipAddress,
+			msg.username,
+			fmt.Sprintf("Failed to clear host key: %v", err),
+			false, // not a host key conflict anymore, just an error
+		)
+		m.ssh.width = m.width
+		m.ssh.height = m.height
+		return m, m.ssh.Init()
+	}
+
+	// Host key cleared — immediately retry SSH connection.
+	return m, func() tea.Msg {
+		return requestSSHMsg{
+			server:    msg.server,
+			username:  msg.username,
+			ipAddress: msg.ipAddress,
+		}
+	}
 }
 
 // --- Delegate to active child ---
@@ -490,6 +739,11 @@ func (m serverAppModel) updateChild(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case appViewCreate:
 		updated, cmd := m.create.Update(msg)
 		m.create = updated.(serverCreateModel)
+		return m, cmd
+
+	case appViewSSH:
+		updated, cmd := m.ssh.Update(msg)
+		m.ssh = updated.(serverSSHModel)
 		return m, cmd
 
 	case appViewAction:
@@ -638,6 +892,48 @@ func newServerCreateModel(provider domain.CatalogProvider, providerName string, 
 		spinner:      s,
 		sshSelected:  make(map[int]struct{}),
 		embedded:     true,
+	}
+}
+
+func newServerSSHModel(server *domain.Server, providerName string, ipAddress string, defaultUsername string) serverSSHModel {
+	ti := textinput.New()
+	ti.Placeholder = "root"
+	ti.Focus()
+	ti.CharLimit = 64
+	ti.Width = 40
+
+	if defaultUsername != "" {
+		ti.SetValue(defaultUsername)
+	}
+
+	return serverSSHModel{
+		server:        server,
+		providerName:  providerName,
+		ipAddress:     ipAddress,
+		usernameInput: ti,
+		embedded:      true,
+	}
+}
+
+func newServerSSHModelWithError(server *domain.Server, providerName string, ipAddress string, defaultUsername string, errorMsg string, hostKeyConflict bool) serverSSHModel {
+	ti := textinput.New()
+	ti.Placeholder = "root"
+	ti.Focus()
+	ti.CharLimit = 64
+	ti.Width = 40
+
+	if defaultUsername != "" {
+		ti.SetValue(defaultUsername)
+	}
+
+	return serverSSHModel{
+		server:          server,
+		providerName:    providerName,
+		ipAddress:       ipAddress,
+		usernameInput:   ti,
+		errorMsg:        errorMsg,
+		hostKeyConflict: hostKeyConflict,
+		embedded:        true,
 	}
 }
 
