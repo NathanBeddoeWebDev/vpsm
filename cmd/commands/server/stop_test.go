@@ -9,6 +9,7 @@ import (
 
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/providers"
+	"nathanbeddoewebdev/vpsm/internal/services/action"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 )
 
@@ -407,8 +408,8 @@ func TestStopCommand_PollTransientErrorExhaustion(t *testing.T) {
 
 	stdout, stderr := execStop(t, "mock", "--id", "42")
 
-	if mock.pollCalls != maxTransientErrors {
-		t.Errorf("expected %d poll calls before giving up, got %d", maxTransientErrors, mock.pollCalls)
+	if mock.pollCalls != action.MaxTransientErrors {
+		t.Errorf("expected %d poll calls before giving up, got %d", action.MaxTransientErrors, mock.pollCalls)
 	}
 	if !strings.Contains(stderr, "consecutive failures") {
 		t.Errorf("expected 'consecutive failures' on stderr, got:\n%s", stderr)

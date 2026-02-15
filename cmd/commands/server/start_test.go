@@ -11,6 +11,7 @@ import (
 
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/providers"
+	"nathanbeddoewebdev/vpsm/internal/services/action"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 )
 
@@ -128,13 +129,13 @@ func execStart(t *testing.T, providerName string, extraArgs ...string) (stdout, 
 	return outBuf.String(), errBuf.String()
 }
 
-// withFastPolling overrides actionPollInterval for the duration of the test
+// withFastPolling overrides PollInterval for the duration of the test
 // so poll-based tests complete quickly.
 func withFastPolling(t *testing.T) {
 	t.Helper()
-	orig := actionPollInterval
-	actionPollInterval = 10 * time.Millisecond
-	t.Cleanup(func() { actionPollInterval = orig })
+	orig := action.PollInterval
+	action.PollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { action.PollInterval = orig })
 }
 
 // --- Immediate completion tests (no polling) ---
@@ -398,12 +399,13 @@ func TestWaitForAction_ContextCancelled(t *testing.T) {
 	cancel() // cancel immediately
 
 	var buf bytes.Buffer
-	action := &domain.ActionStatus{
+	actionStatus := &domain.ActionStatus{
 		ID:     "action-1",
 		Status: domain.ActionStatusRunning,
 	}
 
-	err := waitForAction(ctx, mock, action, "42", "running", &buf)
+	svc := action.NewService(mock, "mock", nil)
+	err := svc.WaitForAction(ctx, actionStatus, "42", "running", &buf)
 	if err == nil {
 		t.Fatal("expected error from cancelled context, got nil")
 	}
@@ -436,12 +438,13 @@ func TestPollByAction_TransientErrorRetry(t *testing.T) {
 	registerStartPollerMockProvider(t, "mock", mock)
 
 	var buf bytes.Buffer
-	action := &domain.ActionStatus{
+	actionStatus := &domain.ActionStatus{
 		ID:     "action-1",
 		Status: domain.ActionStatusRunning,
 	}
 
-	err := waitForAction(context.Background(), mock, action, "42", "running", &buf)
+	svc := action.NewService(mock, "mock", nil)
+	err := svc.WaitForAction(context.Background(), actionStatus, "42", "running", &buf)
 	if err != nil {
 		t.Fatalf("expected nil error after transient recovery, got: %v", err)
 	}
@@ -466,19 +469,20 @@ func TestPollByAction_TransientErrorExhaustion(t *testing.T) {
 	registerStartPollerMockProvider(t, "mock", mock)
 
 	var buf bytes.Buffer
-	action := &domain.ActionStatus{
+	actionStatus := &domain.ActionStatus{
 		ID:     "action-1",
 		Status: domain.ActionStatusRunning,
 	}
 
-	err := waitForAction(context.Background(), mock, action, "42", "running", &buf)
+	svc := action.NewService(mock, "mock", nil)
+	err := svc.WaitForAction(context.Background(), actionStatus, "42", "running", &buf)
 	if err == nil {
 		t.Fatal("expected error after exhausting transient error budget, got nil")
 	}
 	if !strings.Contains(err.Error(), "consecutive failures") {
 		t.Errorf("expected 'consecutive failures' in error, got: %v", err)
 	}
-	if mock.pollCalls != maxTransientErrors {
-		t.Errorf("expected %d poll calls before giving up, got %d", maxTransientErrors, mock.pollCalls)
+	if mock.pollCalls != action.MaxTransientErrors {
+		t.Errorf("expected %d poll calls before giving up, got %d", action.MaxTransientErrors, mock.pollCalls)
 	}
 }

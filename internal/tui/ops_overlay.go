@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"nathanbeddoewebdev/vpsm/internal/actionstore"
 	"nathanbeddoewebdev/vpsm/internal/domain"
+	"nathanbeddoewebdev/vpsm/internal/services/action"
 	"nathanbeddoewebdev/vpsm/internal/tui/styles"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -116,6 +118,8 @@ type opCompletedEvent struct {
 // operation tracks a single in-flight start/stop polling cycle.
 type operation struct {
 	id         int
+	dbID       int64  // database record ID (0 if not persisted)
+	provider   string // provider name for database persistence
 	serverID   string
 	serverName string
 	verb       string // "started" or "stopped"
@@ -140,21 +144,42 @@ type operation struct {
 // It is a value type — methods return a new copy plus any tea.Cmd to
 // execute.
 type opsOverlay struct {
-	provider domain.Provider
-	ops      []operation
-	nextID   int
-	spinner  spinner.Model
+	provider     domain.Provider
+	providerName string
+	ops          []operation
+	nextID       int
+	spinner      spinner.Model
+	svc          *action.Service // persistence service (may be nil if DB unavailable)
 }
 
-// newOpsOverlay creates an overlay bound to the given provider.
-func newOpsOverlay(provider domain.Provider) opsOverlay {
+// newOpsOverlay creates an overlay bound to the given provider and loads
+// any pending actions from the database. Returns the overlay and an optional
+// initialization command.
+func newOpsOverlay(provider domain.Provider, providerName string) (opsOverlay, tea.Cmd) {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(styles.Blue)
-	return opsOverlay{
-		provider: provider,
-		spinner:  s,
+
+	// Open database connection (best-effort, continue if unavailable).
+	repo, err := actionstore.Open()
+	if err != nil {
+		// Log error but continue without persistence.
+		repo = nil
 	}
+
+	svc := action.NewService(provider, providerName, repo)
+
+	o := opsOverlay{
+		provider:     provider,
+		providerName: providerName,
+		spinner:      s,
+		svc:          svc,
+	}
+
+	// Load pending actions from database.
+	cmd := o.loadPendingActions()
+
+	return o, cmd
 }
 
 // HasActive reports whether any operations are still polling.
@@ -171,6 +196,128 @@ func (o opsOverlay) HasActive() bool {
 // awaiting dismiss).
 func (o opsOverlay) HasAny() bool {
 	return len(o.ops) > 0
+}
+
+// --- Database persistence ---
+
+// loadPendingActions retrieves pending actions from the database and
+// reconstructs in-memory operations. Returns a tea.Cmd that immediately
+// polls each loaded action to check current status. Only loads actions
+// that are less than 5 minutes old to avoid showing stale operations.
+func (o *opsOverlay) loadPendingActions() tea.Cmd {
+	if o.svc == nil {
+		return nil
+	}
+
+	records, err := o.svc.ListPending()
+	if err != nil || len(records) == 0 {
+		return nil
+	}
+
+	var cmds []tea.Cmd
+	now := time.Now()
+
+	for _, record := range records {
+		// Filter to current provider only.
+		if record.Provider != o.providerName {
+			continue
+		}
+
+		// Skip stale operations (older than 5 minutes).
+		if now.Sub(record.UpdatedAt) > 5*time.Minute {
+			continue
+		}
+
+		// Reconstruct operation from database record.
+		opID := o.nextID
+		o.nextID++
+
+		verb := "started"
+		if record.Command == "stop_server" {
+			verb = "stopped"
+		}
+
+		op := operation{
+			id:         opID,
+			dbID:       record.ID,
+			provider:   record.Provider,
+			serverID:   record.ServerID,
+			serverName: record.ServerName,
+			verb:       verb,
+			target:     record.TargetStatus,
+			pollMode:   opPollModeAction, // Prefer action polling
+			actionID:   record.ActionID,
+			status:     opStatusActive,
+			statusText: fmt.Sprintf("Resuming %q...", record.ServerName),
+			progress:   record.Progress,
+		}
+
+		o.ops = append(o.ops, op)
+
+		// Immediately poll to get current status.
+		cmds = append(cmds, scheduleOpPollTick(op.id))
+	}
+
+	if len(cmds) > 0 {
+		return tea.Batch(cmds...)
+	}
+	return nil
+}
+
+// saveOp persists an operation to the database. Errors are logged but
+// don't fail the operation (TUI should continue if DB is unavailable).
+func (o *opsOverlay) saveOp(op operation) {
+	if o.svc == nil {
+		return
+	}
+
+	record := &actionstore.ActionRecord{
+		ID:           op.dbID, // 0 for new, or existing DB ID
+		ActionID:     op.actionID,
+		Provider:     o.providerName,
+		ServerID:     op.serverID,
+		ServerName:   op.serverName,
+		Command:      inferCommand(op.verb),
+		TargetStatus: op.target,
+		Status:       mapOpStatusToDomain(op.status),
+		Progress:     op.progress,
+	}
+
+	if err := o.svc.SaveRecord(record); err == nil {
+		// Update the operation's DB ID if this was an insert.
+		if op.dbID == 0 {
+			op.dbID = record.ID
+			// Find and update the operation in the slice.
+			for i := range o.ops {
+				if o.ops[i].id == op.id {
+					o.ops[i].dbID = op.dbID
+					break
+				}
+			}
+		}
+	}
+}
+
+// inferCommand converts a verb to a command name for database storage.
+func inferCommand(verb string) string {
+	if verb == "started" {
+		return "start_server"
+	}
+	return "stop_server"
+}
+
+// mapOpStatusToDomain converts overlay status to domain status.
+func mapOpStatusToDomain(opStatus string) string {
+	switch opStatus {
+	case opStatusActive:
+		return domain.ActionStatusRunning
+	case opStatusSucceeded:
+		return domain.ActionStatusSuccess
+	case opStatusFailed:
+		return domain.ActionStatusError
+	default:
+		return domain.ActionStatusRunning
+	}
 }
 
 // --- Commands ---
@@ -197,6 +344,7 @@ func (o opsOverlay) StartToggle(server domain.Server) (opsOverlay, tea.Cmd) {
 
 	op := operation{
 		id:         opID,
+		provider:   o.providerName,
 		serverID:   server.ID,
 		serverName: server.Name,
 		verb:       verb,
@@ -205,6 +353,9 @@ func (o opsOverlay) StartToggle(server domain.Server) (opsOverlay, tea.Cmd) {
 		statusText: fmt.Sprintf("%s %q...", verbToGerund(verb), server.Name),
 	}
 	o.ops = append(o.ops, op)
+
+	// Persist initial operation state to database.
+	o.saveOp(op)
 
 	provider := o.provider
 	cmd := func() tea.Msg {
@@ -282,11 +433,17 @@ func (o opsOverlay) handleInitiated(msg opToggleInitiatedMsg) (opsOverlay, tea.C
 	op := o.ops[idx]
 	action := msg.action
 
+	// Update action ID if available.
+	if action != nil && action.ID != "" {
+		op.actionID = action.ID
+	}
+
 	// Fast path: action completed synchronously — verify server status.
 	if action != nil && action.Status == domain.ActionStatusSuccess {
 		op.pollMode = opPollModeServer
 		op.statusText = fmt.Sprintf("Verifying %q...", op.serverName)
 		o.ops[idx] = op
+		o.saveOp(op)
 		return o, scheduleOpPollTick(op.id), nil
 	}
 
@@ -299,6 +456,7 @@ func (o opsOverlay) handleInitiated(msg opToggleInitiatedMsg) (opsOverlay, tea.C
 		op.status = opStatusFailed
 		op.statusText = fmt.Sprintf("Failed: %s", errMsg)
 		o.ops[idx] = op
+		o.saveOp(op)
 		return o, scheduleDismiss(op.id), []opCompletedEvent{{
 			ErrText: fmt.Sprintf("Failed to %s server %q: %s", verbToInfinitive(op.verb), op.serverName, errMsg),
 		}}
@@ -313,6 +471,7 @@ func (o opsOverlay) handleInitiated(msg opToggleInitiatedMsg) (opsOverlay, tea.C
 	}
 	op.statusText = fmt.Sprintf("%s %q...", verbToGerund(op.verb), op.serverName)
 	o.ops[idx] = op
+	o.saveOp(op)
 	return o, scheduleOpPollTick(op.id), nil
 }
 
@@ -325,6 +484,7 @@ func (o opsOverlay) handleToggleError(msg opToggleErrorMsg) (opsOverlay, tea.Cmd
 	op.status = opStatusFailed
 	op.statusText = "Failed: " + msg.err.Error()
 	o.ops[idx] = op
+	o.saveOp(op)
 	return o, scheduleDismiss(op.id), []opCompletedEvent{{
 		ErrText: msg.err.Error(),
 	}}
@@ -359,6 +519,7 @@ func (o opsOverlay) handlePollResult(msg opPollResultMsg) (opsOverlay, tea.Cmd, 
 			op.consecutiveErrors = 0
 			op.statusText = fmt.Sprintf("Verifying %q...", op.serverName)
 			o.ops[idx] = op
+			o.saveOp(op)
 			return o, scheduleOpPollTick(op.id), nil
 		}
 		// Server reached target status — success.
@@ -366,6 +527,7 @@ func (o opsOverlay) handlePollResult(msg opPollResultMsg) (opsOverlay, tea.Cmd, 
 		op.statusText = fmt.Sprintf("%q %s", op.serverName, op.verb)
 		op.progress = 100
 		o.ops[idx] = op
+		o.saveOp(op)
 		return o, scheduleDismiss(op.id), []opCompletedEvent{{
 			Success:    true,
 			ServerName: op.serverName,
@@ -380,6 +542,7 @@ func (o opsOverlay) handlePollResult(msg opPollResultMsg) (opsOverlay, tea.Cmd, 
 		op.status = opStatusFailed
 		op.statusText = fmt.Sprintf("Failed: %s", errMsg)
 		o.ops[idx] = op
+		o.saveOp(op)
 		return o, scheduleDismiss(op.id), []opCompletedEvent{{
 			ErrText: fmt.Sprintf("Failed to %s server %q: %s", verbToInfinitive(op.verb), op.serverName, errMsg),
 		}}
@@ -391,6 +554,7 @@ func (o opsOverlay) handlePollResult(msg opPollResultMsg) (opsOverlay, tea.Cmd, 
 			op.status = opStatusFailed
 			op.statusText = fmt.Sprintf("Timed out %s %q", verbToGerund(op.verb), op.serverName)
 			o.ops[idx] = op
+			o.saveOp(op)
 			return o, scheduleDismiss(op.id), []opCompletedEvent{{
 				ErrText: fmt.Sprintf("Timed out waiting for server %q to %s", op.serverName, verbToInfinitive(op.verb)),
 			}}
@@ -403,6 +567,7 @@ func (o opsOverlay) handlePollResult(msg opPollResultMsg) (opsOverlay, tea.Cmd, 
 			op.statusText = fmt.Sprintf("%s %q...", verbToGerund(op.verb), op.serverName)
 		}
 		o.ops[idx] = op
+		o.saveOp(op)
 		return o, scheduleOpPollTick(op.id), nil
 	}
 }
@@ -419,6 +584,7 @@ func (o opsOverlay) handlePollError(msg opPollErrorMsg) (opsOverlay, tea.Cmd, []
 		op.status = opStatusFailed
 		op.statusText = "Rate limited"
 		o.ops[idx] = op
+		o.saveOp(op)
 		return o, scheduleDismiss(op.id), []opCompletedEvent{{
 			ErrText: "Polling stopped (rate limited)",
 		}}
@@ -429,6 +595,7 @@ func (o opsOverlay) handlePollError(msg opPollErrorMsg) (opsOverlay, tea.Cmd, []
 		op.status = opStatusFailed
 		op.statusText = fmt.Sprintf("Failed after %d errors", op.consecutiveErrors)
 		o.ops[idx] = op
+		o.saveOp(op)
 		return o, scheduleDismiss(op.id), []opCompletedEvent{{
 			ErrText: fmt.Sprintf("Error polling (after %d consecutive failures): %v", op.consecutiveErrors, msg.err),
 		}}
@@ -437,6 +604,7 @@ func (o opsOverlay) handlePollError(msg opPollErrorMsg) (opsOverlay, tea.Cmd, []
 	// Transient error within budget — schedule another poll.
 	op.statusText = fmt.Sprintf("Retrying... (%d/%d)", op.consecutiveErrors, overlayMaxTransientErrors)
 	o.ops[idx] = op
+	o.saveOp(op)
 	return o, scheduleOpPollTick(op.id), nil
 }
 
@@ -445,7 +613,10 @@ func (o opsOverlay) handleDismiss(msg opDismissMsg) (opsOverlay, tea.Cmd, []opCo
 	if idx < 0 {
 		return o, nil, nil
 	}
-	// Remove the operation from the list.
+	// Remove the operation from the in-memory list.
+	// Note: We keep the record in the database permanently per user request.
+	// The operation will not be reloaded on next TUI start because
+	// loadPendingActions only loads operations less than 5 minutes old.
 	o.ops = append(o.ops[:idx], o.ops[idx+1:]...)
 	return o, nil, nil
 }
