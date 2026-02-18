@@ -1,12 +1,17 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
+	"strings"
+	"time"
 
+	auditcmd "nathanbeddoewebdev/vpsm/cmd/commands/audit"
 	"nathanbeddoewebdev/vpsm/cmd/commands/auth"
 	cfgcmd "nathanbeddoewebdev/vpsm/cmd/commands/config"
 	"nathanbeddoewebdev/vpsm/cmd/commands/server"
 	"nathanbeddoewebdev/vpsm/cmd/commands/sshkey"
+	"nathanbeddoewebdev/vpsm/internal/auditlog"
 	"nathanbeddoewebdev/vpsm/internal/providers"
 
 	"github.com/spf13/cobra"
@@ -31,6 +36,7 @@ Quick start:
 	}
 
 	cmd.AddCommand(auth.NewCommand())
+	cmd.AddCommand(auditcmd.NewCommand())
 	cmd.AddCommand(cfgcmd.NewCommand())
 	cmd.AddCommand(server.NewCommand())
 	cmd.AddCommand(sshkey.NewCommand())
@@ -42,10 +48,78 @@ Quick start:
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	providers.RegisterHetzner()
+	cobra.EnableTraverseRunHooks = true
 
 	var root = rootCmd()
-	err := root.Execute()
+	root.SilenceUsage = true
+	root.SilenceErrors = true
+
+	start := time.Now().UTC()
+	cmd, err := root.ExecuteC()
+	recordAuditEntry(cmd, err, start)
 	if err != nil {
+		fmt.Fprintf(root.ErrOrStderr(), "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func recordAuditEntry(cmd *cobra.Command, execErr error, start time.Time) {
+	if cmd == nil {
+		return
+	}
+
+	repo, err := auditlog.Open()
+	if err != nil {
+		return
+	}
+	defer repo.Close()
+
+	meta := auditlog.MetadataFromContext(cmd.Context())
+
+	provider := meta.Provider
+	if provider == "" {
+		provider = flagValue(cmd, "provider")
+	}
+
+	resourceType := meta.ResourceType
+	resourceID := meta.ResourceID
+	resourceName := meta.ResourceName
+	if resourceID == "" {
+		id := flagValue(cmd, "id")
+		if id != "" && strings.HasPrefix(cmd.CommandPath(), "vpsm server") {
+			resourceType = "server"
+			resourceID = id
+		}
+	}
+
+	args := strings.Join(auditlog.SanitizeArgs(os.Args[1:]), " ")
+	entry := &auditlog.AuditEntry{
+		Timestamp:    start,
+		Command:      cmd.CommandPath(),
+		Args:         args,
+		Provider:     provider,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		ResourceName: resourceName,
+		DurationMs:   time.Since(start).Milliseconds(),
+	}
+	if execErr != nil {
+		entry.Outcome = auditlog.OutcomeError
+		entry.Detail = execErr.Error()
+	} else {
+		entry.Outcome = auditlog.OutcomeSuccess
+	}
+
+	_ = repo.Save(entry)
+}
+
+func flagValue(cmd *cobra.Command, name string) string {
+	if cmd == nil {
+		return ""
+	}
+	flag := cmd.Flag(name)
+	if flag == nil {
+		return ""
+	}
+	return flag.Value.String()
 }

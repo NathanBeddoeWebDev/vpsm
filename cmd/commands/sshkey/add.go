@@ -8,6 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"nathanbeddoewebdev/vpsm/internal/auditlog"
 	"nathanbeddoewebdev/vpsm/internal/domain"
 	"nathanbeddoewebdev/vpsm/internal/providers"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
@@ -42,7 +43,8 @@ Examples:
 
   # Upload with provider override
   vpsm ssh-key add --provider hetzner --name my-key`,
-		Run: runAdd,
+		RunE:         runAdd,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().String("name", "", "Name for the SSH key (interactive prompt if not provided)")
@@ -51,26 +53,23 @@ Examples:
 	return cmd
 }
 
-func runAdd(cmd *cobra.Command, args []string) {
+func runAdd(cmd *cobra.Command, args []string) error {
 	providerName := cmd.Flag("provider").Value.String()
 
 	provider, err := providers.Get(providerName, auth.DefaultStore())
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return err
 	}
 
 	keyManager, ok := provider.(domain.SSHKeyManager)
 	if !ok {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: provider %q does not support SSH key management\n", providerName)
-		return
+		return fmt.Errorf("provider %q does not support SSH key management", providerName)
 	}
 
 	publicKeyInput, _ := cmd.Flags().GetString("public-key")
 	publicKeyProvided := cmd.Flags().Changed("public-key")
 	if publicKeyProvided && len(args) > 0 {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: provide a path or --public-key, not both\n")
-		return
+		return fmt.Errorf("provide a path or --public-key, not both")
 	}
 
 	keyName, _ := cmd.Flags().GetString("name")
@@ -82,8 +81,7 @@ func runAdd(cmd *cobra.Command, args []string) {
 
 	if needsInteractive {
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
-			fmt.Fprintln(cmd.ErrOrStderr(), "Error: interactive mode requires a terminal. Provide --name and a key input to run non-interactively.")
-			return
+			return fmt.Errorf("interactive mode requires a terminal; provide --name and a key input to run non-interactively")
 		}
 
 		prefill := tui.SSHKeyAddPrefill{Name: keyName}
@@ -105,14 +103,13 @@ func runAdd(cmd *cobra.Command, args []string) {
 		if err != nil {
 			if errors.Is(err, tui.ErrAborted) {
 				fmt.Fprintln(cmd.ErrOrStderr(), "SSH key add cancelled.")
-				return
+				return nil
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-			return
+			return err
 		}
 		if result == nil {
 			fmt.Fprintln(cmd.ErrOrStderr(), "SSH key add cancelled.")
-			return
+			return nil
 		}
 
 		publicKey = result.PublicKey
@@ -121,28 +118,24 @@ func runAdd(cmd *cobra.Command, args []string) {
 		if publicKeyProvided {
 			publicKey, err = sshkeys.ValidatePublicKey(publicKeyInput)
 			if err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-				return
+				return err
 			}
 		} else {
 			keyPath = args[0]
 			keyPath, err = sshkeys.ExpandHomePath(keyPath)
 			if err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-				return
+				return err
 			}
 			if _, err := os.Stat(keyPath); os.IsNotExist(err) {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Error: SSH key file not found: %s\n", keyPath)
 				printCommonSSHKeyPaths(cmd)
-				return
+				return fmt.Errorf("SSH key file not found: %s", keyPath)
 			}
 
 			fmt.Fprintf(cmd.ErrOrStderr(), "Reading key from %s\n", keyPath)
 
 			publicKey, err = sshkeys.ReadAndValidatePublicKey(keyPath)
 			if err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-				return
+				return err
 			}
 		}
 	}
@@ -153,15 +146,23 @@ func runAdd(cmd *cobra.Command, args []string) {
 	ctx := context.Background()
 	keySpec, err := keyManager.CreateSSHKey(ctx, keyName, publicKey)
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "\nError: %v\n", err)
-		return
+		fmt.Fprintln(cmd.ErrOrStderr())
+		return fmt.Errorf("failed to upload ssh key: %w", err)
 	}
 
 	fmt.Fprintln(cmd.ErrOrStderr(), " done")
 	fmt.Fprintln(cmd.ErrOrStderr())
 
+	cmd.SetContext(auditlog.WithMetadata(cmd.Context(), auditlog.Metadata{
+		Provider:     providerName,
+		ResourceType: "ssh-key",
+		ResourceID:   keySpec.ID,
+		ResourceName: keySpec.Name,
+	}))
+
 	// Print the result
 	printKeyDetails(cmd, keySpec)
+	return nil
 }
 
 func printKeyDetails(cmd *cobra.Command, key *domain.SSHKeySpec) {
