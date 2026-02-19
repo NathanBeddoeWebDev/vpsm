@@ -354,10 +354,7 @@ func (m serverListModel) View() string {
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
 	statusH := lipgloss.Height(statusBar)
-	contentH := m.height - headerH - footerH - statusH
-	if contentH < 1 {
-		contentH = 1
-	}
+	contentH := max(m.height-headerH-footerH-statusH, 1)
 
 	content := m.renderContent(contentH)
 
@@ -463,10 +460,9 @@ func (m serverListModel) renderTable(height int) string {
 	sep := styles.MutedText.Render(strings.Repeat("─", available))
 
 	// Render data rows.
-	visibleRows := height - 3 // header + sep + bottom padding
-	if visibleRows < 1 {
-		visibleRows = 1
-	}
+	visibleRows := max(
+		// header + sep + bottom padding
+		height-3, 1)
 
 	// Scrolling: keep cursor visible.
 	startIdx := 0
@@ -476,10 +472,7 @@ func (m serverListModel) renderTable(height int) string {
 	endIdx := startIdx + visibleRows
 	if endIdx > len(m.servers) {
 		endIdx = len(m.servers)
-		startIdx = endIdx - visibleRows
-		if startIdx < 0 {
-			startIdx = 0
-		}
+		startIdx = max(endIdx-visibleRows, 0)
 	}
 
 	rows := make([]string, 0, visibleRows)

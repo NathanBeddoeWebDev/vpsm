@@ -5,8 +5,10 @@ import (
 
 	"nathanbeddoewebdev/vpsm/cmd/commands/auth"
 	cfgcmd "nathanbeddoewebdev/vpsm/cmd/commands/config"
+	"nathanbeddoewebdev/vpsm/cmd/commands/dns"
 	"nathanbeddoewebdev/vpsm/cmd/commands/server"
 	"nathanbeddoewebdev/vpsm/cmd/commands/sshkey"
+	dnsproviders "nathanbeddoewebdev/vpsm/internal/dns/providers"
 	"nathanbeddoewebdev/vpsm/internal/providers"
 
 	"github.com/spf13/cobra"
@@ -32,6 +34,7 @@ Quick start:
 
 	cmd.AddCommand(auth.NewCommand())
 	cmd.AddCommand(cfgcmd.NewCommand())
+	cmd.AddCommand(dns.NewCommand())
 	cmd.AddCommand(server.NewCommand())
 	cmd.AddCommand(sshkey.NewCommand())
 
@@ -42,6 +45,8 @@ Quick start:
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	providers.RegisterHetzner()
+	dnsproviders.RegisterPorkbun()
+	dnsproviders.RegisterCloudflare()
 
 	var root = rootCmd()
 	err := root.Execute()
