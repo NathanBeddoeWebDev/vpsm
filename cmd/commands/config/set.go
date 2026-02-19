@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"nathanbeddoewebdev/vpsm/internal/config"
@@ -68,10 +69,8 @@ func runSet(cmd *cobra.Command, args []string) error {
 func validateProvider(cmd *cobra.Command, name string) error {
 	normalized := util.NormalizeKey(name)
 	known := providers.List()
-	for _, p := range known {
-		if p == normalized {
-			return nil
-		}
+	if slices.Contains(known, normalized) {
+		return nil
 	}
 	return fmt.Errorf("unknown provider %q (registered: %s)", name, strings.Join(known, ", "))
 }

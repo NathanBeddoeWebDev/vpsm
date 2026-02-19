@@ -40,7 +40,7 @@ func TestSave_AssignsIDAndTimestamp(t *testing.T) {
 func TestList(t *testing.T) {
 	r := tempRepo(t)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		entry := &AuditEntry{
 			Command:   "vpsm server list",
 			Outcome:   OutcomeSuccess,

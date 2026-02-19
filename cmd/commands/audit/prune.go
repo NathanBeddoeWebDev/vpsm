@@ -57,8 +57,8 @@ func runPrune(cmd *cobra.Command, args []string) error {
 }
 
 func parseDuration(input string) (time.Duration, error) {
-	if strings.HasSuffix(input, "d") {
-		num := strings.TrimSuffix(input, "d")
+	if before, ok := strings.CutSuffix(input, "d"); ok {
+		num := before
 		days, err := strconv.Atoi(num)
 		if err != nil {
 			return 0, fmt.Errorf("invalid duration %q", input)
