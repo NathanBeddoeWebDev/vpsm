@@ -3,9 +3,13 @@ package dns
 import (
 	"context"
 	"fmt"
+	"os"
 	"text/tabwriter"
 
+	"nathanbeddoewebdev/vpsm/internal/tui"
+
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // DomainsCommand returns the "dns domains" subcommand.
@@ -28,6 +32,16 @@ func runDomains(cmd *cobra.Command, args []string) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 		return
 	}
+
+	providerName := cmd.Flag("provider").Value.String()
+
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		if _, err := tui.RunDNSApp(svc, providerName, ""); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "Error running TUI: %v\n", err)
+		}
+		return
+	}
+
 	domains, err := svc.ListDomains(context.Background())
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error listing domains: %v\n", err)
