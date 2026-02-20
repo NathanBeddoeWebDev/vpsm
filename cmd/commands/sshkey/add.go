@@ -8,11 +8,11 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"nathanbeddoewebdev/vpsm/internal/domain"
-	"nathanbeddoewebdev/vpsm/internal/providers"
+	platformsshkey "nathanbeddoewebdev/vpsm/internal/platform/sshkey"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
+	"nathanbeddoewebdev/vpsm/internal/sshkey/providers"
+	"nathanbeddoewebdev/vpsm/internal/sshkey/tui"
 	"nathanbeddoewebdev/vpsm/internal/sshkeys"
-	"nathanbeddoewebdev/vpsm/internal/tui"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -57,12 +57,6 @@ func runAdd(cmd *cobra.Command, args []string) {
 	provider, err := providers.Get(providerName, auth.DefaultStore())
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
-	}
-
-	keyManager, ok := provider.(domain.SSHKeyManager)
-	if !ok {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: provider %q does not support SSH key management\n", providerName)
 		return
 	}
 
@@ -151,7 +145,7 @@ func runAdd(cmd *cobra.Command, args []string) {
 	fmt.Fprintf(cmd.ErrOrStderr(), "Uploading SSH key %q to %s...", keyName, provider.GetDisplayName())
 
 	ctx := context.Background()
-	keySpec, err := keyManager.CreateSSHKey(ctx, keyName, publicKey)
+	keySpec, err := provider.CreateSSHKey(ctx, keyName, publicKey)
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "\nError: %v\n", err)
 		return
@@ -164,7 +158,7 @@ func runAdd(cmd *cobra.Command, args []string) {
 	printKeyDetails(cmd, keySpec)
 }
 
-func printKeyDetails(cmd *cobra.Command, key *domain.SSHKeySpec) {
+func printKeyDetails(cmd *cobra.Command, key *platformsshkey.Spec) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 	defer w.Flush()
 
