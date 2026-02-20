@@ -21,17 +21,15 @@ func LoginCommand() *cobra.Command {
 Example:
   vpsm auth login hetzner`,
 		Args: cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			provider := strings.TrimSpace(args[0])
 			if provider == "" {
-				fmt.Fprintln(cmd.ErrOrStderr(), "provider is required")
-				return
+				return fmt.Errorf("provider is required")
 			}
 
 			token, err := cmd.Flags().GetString("token")
 			if err != nil {
-				fmt.Fprintln(cmd.ErrOrStderr(), err)
-				return
+				return err
 			}
 
 			token = strings.TrimSpace(token)
@@ -42,33 +40,31 @@ Example:
 				if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
 					result, err := tui.RunAuthLogin(provider, store)
 					if err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-						return
+						return fmt.Errorf("auth login failed: %w", err)
 					}
 					if result != nil && result.Saved {
 						fmt.Fprintf(cmd.OutOrStdout(), "Saved token for provider %s\n", provider)
 					} else {
 						fmt.Fprintln(cmd.ErrOrStderr(), "Login cancelled.")
 					}
-					return
+					return nil
 				}
 
-				fmt.Fprintln(cmd.ErrOrStderr(), "Error: non-interactive login requires --token")
-				return
+				return fmt.Errorf("non-interactive login requires --token")
 			}
 
 			if token == "" {
-				fmt.Fprintln(cmd.ErrOrStderr(), "token cannot be empty")
-				return
+				return fmt.Errorf("token cannot be empty")
 			}
 
 			if err := store.SetToken(provider, token); err != nil {
-				fmt.Fprintln(cmd.ErrOrStderr(), err)
-				return
+				return err
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Saved token for provider %s\n", provider)
+			return nil
 		},
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().String("token", "", "API token (optional, overrides prompt)")

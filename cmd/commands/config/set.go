@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"nathanbeddoewebdev/vpsm/internal/config"
@@ -20,8 +21,9 @@ func SetCommand() *cobra.Command {
 			config.KeysHelp() +
 			"\nExamples:\n" +
 			"  vpsm config set default-provider hetzner",
-		Args: cobra.ExactArgs(2),
-		Run:  runSet,
+		Args:         cobra.ExactArgs(2),
+		RunE:         runSet,
+		SilenceUsage: true,
 	}
 
 	return cmd
@@ -33,49 +35,42 @@ var validators = map[string]func(cmd *cobra.Command, value string) error{
 	"default-provider": validateProvider,
 }
 
-func runSet(cmd *cobra.Command, args []string) {
+func runSet(cmd *cobra.Command, args []string) error {
 	key := util.NormalizeKey(args[0])
 	value := args[1]
 
 	spec := config.Lookup(key)
 	if spec == nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: unknown configuration key %q\n", args[0])
-		fmt.Fprintf(cmd.ErrOrStderr(), "Valid keys: %s\n", strings.Join(config.KeyNames(), ", "))
-		return
+		return fmt.Errorf("unknown configuration key %q (valid: %s)", args[0], strings.Join(config.KeyNames(), ", "))
 	}
 
 	if validate, ok := validators[spec.Name]; ok {
 		if err := validate(cmd, value); err != nil {
-			return // validate already printed the error
+			return err
 		}
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	normalized := util.NormalizeKey(value)
 	spec.Set(cfg, normalized)
 	if err := cfg.Save(); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
-		return
+		return fmt.Errorf("failed to save config: %w", err)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "%s set to %q\n", spec.Name, normalized)
+	return nil
 }
 
 // validateProvider checks that the given name is a registered provider.
 func validateProvider(cmd *cobra.Command, name string) error {
 	normalized := util.NormalizeKey(name)
 	known := providernames.List()
-	for _, p := range known {
-		if p == normalized {
-			return nil
-		}
+	if slices.Contains(known, normalized) {
+		return nil
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "Error: unknown provider %q\n", name)
-	fmt.Fprintf(cmd.ErrOrStderr(), "Registered providers: %v\n", known)
-	return fmt.Errorf("unknown provider %q", name)
+	return fmt.Errorf("unknown provider %q (registered: %s)", name, strings.Join(known, ", "))
 }
