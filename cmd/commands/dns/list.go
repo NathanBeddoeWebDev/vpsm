@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"nathanbeddoewebdev/vpsm/internal/tui"
+	dnstui "nathanbeddoewebdev/vpsm/internal/dns/tui"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -45,7 +45,7 @@ func runList(cmd *cobra.Command, args []string) {
 	providerName := cmd.Flag("provider").Value.String()
 
 	if term.IsTerminal(int(os.Stdout.Fd())) {
-		if _, err := tui.RunDNSApp(svc, providerName, domainName); err != nil {
+		if _, err := dnstui.RunDNSApp(svc, providerName, domainName); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Error running TUI: %v\n", err)
 		}
 		return

@@ -7,7 +7,7 @@ import (
 
 	"nathanbeddoewebdev/vpsm/internal/config"
 	dnsproviders "nathanbeddoewebdev/vpsm/internal/dns/providers"
-	"nathanbeddoewebdev/vpsm/internal/providers"
+	providernames "nathanbeddoewebdev/vpsm/internal/platform/providers/names"
 	"nathanbeddoewebdev/vpsm/internal/util"
 
 	"github.com/spf13/cobra"
@@ -72,7 +72,7 @@ func runSet(cmd *cobra.Command, args []string) {
 // validateProvider checks that the given name is a registered server provider.
 func validateProvider(cmd *cobra.Command, name string) error {
 	normalized := util.NormalizeKey(name)
-	known := providers.List()
+	known := providernames.List()
 	if slices.Contains(known, normalized) {
 		return nil
 	}

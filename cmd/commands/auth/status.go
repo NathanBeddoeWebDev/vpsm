@@ -6,7 +6,7 @@ import (
 	"os"
 
 	credproviders "nathanbeddoewebdev/vpsm/internal/platform/providers"
-	"nathanbeddoewebdev/vpsm/internal/providers"
+	providernames "nathanbeddoewebdev/vpsm/internal/platform/providers/names"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 	"nathanbeddoewebdev/vpsm/internal/tui"
 
@@ -35,7 +35,7 @@ Example:
 			}
 
 			// Non-interactive fallback: check all known credential specs first,
-			// then fall back to the server provider registry for any not covered.
+			// then fall back to the provider name registry for any not covered.
 			shown := map[string]bool{}
 
 			for _, spec := range credproviders.All() {
@@ -56,8 +56,8 @@ Example:
 				}
 			}
 
-			// Also show any server providers not covered by the credential spec registry.
-			for _, providerName := range providers.List() {
+			// Also show any providers not covered by the credential spec registry.
+			for _, providerName := range providernames.List() {
 				if shown[providerName] {
 					continue
 				}

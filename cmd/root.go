@@ -9,7 +9,8 @@ import (
 	"nathanbeddoewebdev/vpsm/cmd/commands/server"
 	"nathanbeddoewebdev/vpsm/cmd/commands/sshkey"
 	dnsproviders "nathanbeddoewebdev/vpsm/internal/dns/providers"
-	"nathanbeddoewebdev/vpsm/internal/providers"
+	serverproviders "nathanbeddoewebdev/vpsm/internal/server/providers"
+	sshkeyproviders "nathanbeddoewebdev/vpsm/internal/sshkey/providers"
 
 	"github.com/spf13/cobra"
 )
@@ -44,7 +45,8 @@ Quick start:
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	providers.RegisterHetzner()
+	serverproviders.RegisterHetzner()
+	sshkeyproviders.RegisterHetzner()
 	dnsproviders.RegisterPorkbun()
 	dnsproviders.RegisterCloudflare()
 

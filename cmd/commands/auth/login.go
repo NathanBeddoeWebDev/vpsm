@@ -9,7 +9,7 @@ import (
 
 	dnsproviders "nathanbeddoewebdev/vpsm/internal/dns/providers"
 	credproviders "nathanbeddoewebdev/vpsm/internal/platform/providers"
-	serverproviders "nathanbeddoewebdev/vpsm/internal/providers"
+	providernames "nathanbeddoewebdev/vpsm/internal/platform/providers/names"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 	"nathanbeddoewebdev/vpsm/internal/tui"
 	"nathanbeddoewebdev/vpsm/internal/util"
@@ -114,7 +114,7 @@ func isKnownProvider(name string) bool {
 	}
 
 	// Check server provider registry.
-	if slices.Contains(serverproviders.List(), normalized) {
+	if slices.Contains(providernames.List(), normalized) {
 		return true
 	}
 

@@ -7,9 +7,7 @@ import (
 	"testing"
 
 	"nathanbeddoewebdev/vpsm/internal/config"
-	"nathanbeddoewebdev/vpsm/internal/domain"
-	"nathanbeddoewebdev/vpsm/internal/providers"
-	"nathanbeddoewebdev/vpsm/internal/services/auth"
+	providernames "nathanbeddoewebdev/vpsm/internal/platform/providers/names"
 )
 
 // setupTestConfig points the config package at a temp file and returns cleanup.
@@ -21,14 +19,12 @@ func setupTestConfig(t *testing.T) string {
 	return path
 }
 
-// registerTestProvider registers a mock provider in the global registry.
+// registerTestProvider registers a provider name for validation.
 func registerTestProvider(t *testing.T, name string) {
 	t.Helper()
-	providers.Reset()
-	t.Cleanup(func() { providers.Reset() })
-	providers.Register(name, func(store auth.Store) (domain.Provider, error) {
-		return nil, nil
-	})
+	providernames.Reset()
+	t.Cleanup(func() { providernames.Reset() })
+	providernames.Register(name)
 }
 
 // execConfig creates the config command, wires up output buffers, runs with the

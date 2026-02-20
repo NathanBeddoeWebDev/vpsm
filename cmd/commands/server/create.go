@@ -8,10 +8,10 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"nathanbeddoewebdev/vpsm/internal/domain"
-	"nathanbeddoewebdev/vpsm/internal/providers"
+	"nathanbeddoewebdev/vpsm/internal/server/domain"
+	"nathanbeddoewebdev/vpsm/internal/server/providers"
+	"nathanbeddoewebdev/vpsm/internal/server/tui"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
-	"nathanbeddoewebdev/vpsm/internal/tui"
 	"nathanbeddoewebdev/vpsm/internal/util"
 
 	"github.com/spf13/cobra"
