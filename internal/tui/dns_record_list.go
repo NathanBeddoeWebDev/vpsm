@@ -99,8 +99,20 @@ func (m *dnsRecordListModel) applyFilter() {
 			m.cursor = 0
 		}
 	}
-	if m.listStart >= len(m.filtered) {
-		m.listStart = 0
+	m.updateScroll()
+}
+
+func (m *dnsRecordListModel) updateScroll() {
+	headerH, footerH, statusH := 3, 1, 1 // approximate
+	contentH := max(m.height-headerH-footerH-statusH, 1)
+	filterBarH := 1
+	tableH := max(contentH-filterBarH-1, 1)
+	visibleRows := max(tableH-3, 1)
+
+	if m.cursor < m.listStart {
+		m.listStart = m.cursor
+	} else if m.cursor >= m.listStart+visibleRows {
+		m.listStart = m.cursor - visibleRows + 1
 	}
 }
 
@@ -113,13 +125,22 @@ func (m dnsRecordListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case tea.KeyMsg:
+		if m.loading {
+			if msg.String() == "ctrl+c" {
+				if !m.embedded {
+					return m, tea.Quit
+				}
+			}
+			return m, nil
+		}
+
 		switch msg.String() {
 		case "esc", "backspace":
 			if m.embedded {
 				return m, func() tea.Msg { return dnsNavigateBackMsg{} }
 			}
 			return m, tea.Quit
-		case "q":
+		case "ctrl+c", "q":
 			if !m.embedded {
 				return m, tea.Quit
 			}
@@ -127,12 +148,21 @@ func (m dnsRecordListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor > 0 {
 				m.cursor--
 			}
+			m.updateScroll()
 		case "down", "j":
 			if m.cursor < len(m.filtered)-1 {
 				m.cursor++
 			}
+			m.updateScroll()
+		case "g":
+			m.cursor = 0
+			m.updateScroll()
+		case "G":
+			if len(m.filtered) > 0 {
+				m.cursor = len(m.filtered) - 1
+			}
+			m.updateScroll()
 		case "f":
-			// Cycle type filter
 			idx := 0
 			for i, t := range m.typeTypes {
 				if t == m.typeFilter {
@@ -179,10 +209,9 @@ func (m dnsRecordListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.records = msg.records
 		m.applyFilter()
 
-		status := fmt.Sprintf("Loaded %d records.", len(m.records))
+		status := fmt.Sprintf("%d record(s)", len(m.records))
 		if m.persistentStatus != "" {
 			status = m.persistentStatus + " | " + status
-			// We keep persistentStatus around until the user does something else
 		}
 		m.status = status
 
@@ -204,49 +233,96 @@ func (m dnsRecordListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m dnsRecordListModel) View() string {
+	if m.width == 0 || m.height == 0 {
+		return ""
+	}
+
 	header := components.Header(m.width, "dns > "+m.domain, m.providerName)
 
-	bindings := []components.KeyBinding{
-		{Key: "j/k", Desc: "nav"},
-		{Key: "enter", Desc: "show"},
-		{Key: "c", Desc: "create"},
-		{Key: "d", Desc: "delete"},
-		{Key: "e", Desc: "edit"},
-		{Key: "f", Desc: "filter"},
-		{Key: "esc", Desc: "back"},
+	var footerBindings []components.KeyBinding
+	if m.loading {
+		footerBindings = []components.KeyBinding{
+			{Key: "ctrl+c", Desc: "quit"},
+		}
+	} else {
+		footerBindings = []components.KeyBinding{
+			{Key: "j/k", Desc: "nav"},
+			{Key: "enter", Desc: "show"},
+			{Key: "c", Desc: "create"},
+			{Key: "d", Desc: "delete"},
+			{Key: "e", Desc: "edit"},
+			{Key: "f", Desc: "filter"},
+			{Key: "esc", Desc: "back"},
+		}
+		if !m.embedded {
+			footerBindings = append(footerBindings, components.KeyBinding{Key: "q", Desc: "quit"})
+		}
 	}
-	if !m.embedded {
-		bindings = append(bindings, components.KeyBinding{Key: "q", Desc: "quit"})
-	}
-	footer := components.Footer(m.width, bindings)
+	footer := components.Footer(m.width, footerBindings)
 
-	statusBar := components.StatusBar(m.width, m.status, m.statusIsError)
+	statusBar := ""
+	if m.err != nil {
+		statusBar = components.StatusBar(m.width, "Error: "+m.err.Error(), true)
+	} else if m.status != "" {
+		statusBar = components.StatusBar(m.width, m.status, m.statusIsError)
+	}
 
 	headerH := lipgloss.Height(header)
 	footerH := lipgloss.Height(footer)
 	statusH := lipgloss.Height(statusBar)
-	contentH := m.height - headerH - footerH - statusH
-	if contentH < 1 {
-		contentH = 1
-	}
+	contentH := max(m.height-headerH-footerH-statusH, 1)
 
-	var content string
+	content := m.renderContent(contentH)
+
+	sections := []string{header, content}
+	if statusBar != "" {
+		sections = append(sections, statusBar)
+	}
+	sections = append(sections, footer)
+
+	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+func (m dnsRecordListModel) renderContent(height int) string {
 	if m.loading {
-		content = fmt.Sprintf("\n  %s Loading records...", m.spinner.View())
-	} else if m.err != nil {
-		content = fmt.Sprintf("\n  %s", styles.ErrorText.Render(m.err.Error()))
-	} else if len(m.records) == 0 {
-		content = "\n  No records found for this domain."
-	} else {
-		content = m.renderFilterBar() + "\n" + m.renderTable(contentH-2)
+		loadingText := m.spinner.View() + "  Fetching records…"
+		return lipgloss.Place(
+			m.width, height,
+			lipgloss.Center, lipgloss.Center,
+			styles.MutedText.Render(loadingText),
+		)
 	}
 
-	lines := lipgloss.Height(content)
-	if lines < contentH {
-		content += lipgloss.NewStyle().Height(contentH - lines).Render("")
+	if m.err != nil {
+		return lipgloss.Place(
+			m.width, height,
+			lipgloss.Center, lipgloss.Center,
+			styles.ErrorText.Render(fmt.Sprintf("Error: %v", m.err)),
+		)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, content, statusBar, footer)
+	if len(m.records) == 0 {
+		return lipgloss.Place(
+			m.width, height,
+			lipgloss.Center, lipgloss.Center,
+			styles.MutedText.Render("No records found for this domain."),
+		)
+	}
+
+	filterBar := m.renderFilterBar()
+	tableH := max(height-lipgloss.Height(filterBar)-1, 1) // -1 for margin
+	table := m.renderTable(tableH)
+
+	// Create table + filter with space, pad remaining if needed
+	content := lipgloss.JoinVertical(lipgloss.Left, filterBar, "", table)
+
+	contentLines := strings.Split(content, "\n")
+	if len(contentLines) < height {
+		padding := strings.Repeat("\n", height-len(contentLines))
+		content += padding
+	}
+
+	return content
 }
 
 func (m dnsRecordListModel) renderFilterBar() string {
@@ -271,49 +347,64 @@ func (m dnsRecordListModel) renderFilterBar() string {
 
 func (m dnsRecordListModel) renderTable(height int) string {
 	if len(m.filtered) == 0 {
-		return "\n  No records match current filter."
+		return lipgloss.Place(
+			m.width, height,
+			lipgloss.Center, lipgloss.Top,
+			styles.MutedText.Render("\nNo records match the current filter."),
+		)
 	}
 
-	cols := []int{30, 8, 40, 8}
-
-	header := styles.TableHeader.Render(
-		fmt.Sprintf("  %-*s %-*s %-*s %-*s",
-			cols[0], "NAME",
-			cols[1], "TYPE",
-			cols[2], "CONTENT",
-			cols[3], "TTL",
-		),
-	)
-
-	var rows []string
-	rows = append(rows, header)
-
-	if m.cursor < m.listStart {
-		m.listStart = m.cursor
-	} else if m.cursor >= m.listStart+(height-1) {
-		m.listStart = m.cursor - (height - 2)
+	type column struct {
+		title string
+		width int
 	}
 
-	end := m.listStart + height - 1
+	available := m.width - 4
+
+	cols := []column{
+		{title: "NAME", width: 20},
+		{title: "TYPE", width: 8},
+		{title: "CONTENT", width: 30},
+		{title: "TTL", width: 8},
+	}
+
+	// Distribute remaining width to the CONTENT column
+	total := 0
+	for _, c := range cols {
+		total += c.width
+	}
+	if available > total {
+		extra := available - total
+		for i := range cols {
+			if cols[i].title == "CONTENT" {
+				cols[i].width += extra
+				break
+			}
+		}
+	}
+
+	headerCells := make([]string, len(cols))
+	for i, col := range cols {
+		headerCells[i] = styles.TableHeader.
+			Width(col.width).
+			Render(col.title)
+	}
+	headerRow := lipgloss.JoinHorizontal(lipgloss.Top, headerCells...)
+
+	sep := styles.MutedText.Render(strings.Repeat("─", available))
+
+	visibleRows := max(height-3, 1)
+
+	end := m.listStart + visibleRows
 	if end > len(m.filtered) {
 		end = len(m.filtered)
 	}
 
+	var rows []string
+	rows = append(rows, headerRow, sep)
+
 	for i := m.listStart; i < end; i++ {
 		r := m.filtered[i]
-
-		cursor := " "
-		rowStyle := styles.TableCell
-		if i == m.cursor {
-			cursor = styles.AccentText.Render(">")
-			rowStyle = styles.TableSelectedRow
-		}
-
-		// Truncate content if too long
-		contentStr := r.Content
-		if len(contentStr) > cols[2]-2 {
-			contentStr = contentStr[:cols[2]-5] + "..."
-		}
 
 		typeColor := styles.Value
 		switch r.Type {
@@ -327,14 +418,29 @@ func (m dnsRecordListModel) renderTable(height int) string {
 			typeColor = styles.MutedText
 		}
 
-		row := fmt.Sprintf("%s %-*s %-*s %-*s %-*d",
-			cursor,
-			cols[0], r.Name,
-			cols[1], typeColor.Render(string(r.Type)),
-			cols[2], contentStr,
-			cols[3], r.TTL,
-		)
-		rows = append(rows, rowStyle.Render(row))
+		contentStr := r.Content
+		if len(contentStr) > cols[2].width-2 {
+			contentStr = contentStr[:cols[2].width-5] + "..."
+		}
+
+		cells := []string{
+			lipgloss.NewStyle().Width(cols[0].width).Render(r.Name),
+			lipgloss.NewStyle().Width(cols[1].width).Render(typeColor.Render(string(r.Type))),
+			lipgloss.NewStyle().Width(cols[2].width).Render(contentStr),
+			lipgloss.NewStyle().Width(cols[3].width).Render(fmt.Sprintf("%d", r.TTL)),
+		}
+
+		rowContent := lipgloss.JoinHorizontal(lipgloss.Top, cells...)
+
+		cursor := "  "
+		rowStyle := styles.TableCell
+		if i == m.cursor {
+			cursor = styles.AccentText.Render("> ")
+			rowStyle = styles.TableSelectedRow
+		}
+
+		renderedRow := lipgloss.JoinHorizontal(lipgloss.Top, cursor, rowStyle.Render(rowContent))
+		rows = append(rows, renderedRow)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, rows...)

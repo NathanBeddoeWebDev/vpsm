@@ -119,6 +119,13 @@ func (m dnsRecordEditModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "ctrl+c":
 			return m, tea.Quit
+		case "q":
+			if m.step == dnsCreateStepConfirm {
+				if m.embedded {
+					return m, func() tea.Msg { return dnsNavigateBackMsg{} }
+				}
+				return m, tea.Quit
+			}
 		case "enter":
 			// Process current step
 			switch m.step {
@@ -278,11 +285,6 @@ func (m dnsRecordEditModel) renderInputStep(title string) string {
 	in.TextStyle = styles.Value
 	in.PlaceholderStyle = styles.MutedText
 
-	if in.Focused() {
-		view := in.View()
-		box := styles.CardActive.Render(view)
-		return fmt.Sprintf("  %s\n\n%s", styles.Subtitle.Render(title+":"), "  "+box)
-	}
 	return fmt.Sprintf("  %s\n\n  %s", styles.Subtitle.Render(title+":"), in.View())
 }
 

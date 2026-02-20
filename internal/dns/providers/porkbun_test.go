@@ -239,7 +239,7 @@ func TestCreateRecord_HappyPath(t *testing.T) {
 		var body any
 		if callCount == 1 {
 			// POST /dns/create/example.com
-			body = porkbunSuccess(map[string]any{"id": "201"})
+			body = porkbunSuccess(map[string]any{"id": 201})
 		} else {
 			// POST /dns/retrieve/example.com/201
 			body = porkbunSuccess(map[string]any{

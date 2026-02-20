@@ -56,12 +56,14 @@ func newDNSRecordCreateModel(svc *services.Service, providerName, domainName str
 	nameIn := textinput.New()
 	nameIn.Placeholder = "e.g. www (leave empty for root)"
 	nameIn.SetValue(prefill.Name)
+	nameIn.Width = 40
 	inputs[dnsCreateStepName] = nameIn
 
 	// Content input
 	contentIn := textinput.New()
 	contentIn.Placeholder = "e.g. 1.2.3.4"
 	contentIn.SetValue(prefill.Content)
+	contentIn.Width = 40
 	inputs[dnsCreateStepContent] = contentIn
 
 	// TTL input
@@ -70,6 +72,7 @@ func newDNSRecordCreateModel(svc *services.Service, providerName, domainName str
 	if prefill.TTL > 0 {
 		ttlIn.SetValue(strconv.Itoa(prefill.TTL))
 	}
+	ttlIn.Width = 40
 	inputs[dnsCreateStepTTL] = ttlIn
 
 	// Priority input
@@ -78,12 +81,14 @@ func newDNSRecordCreateModel(svc *services.Service, providerName, domainName str
 	if prefill.Priority > 0 {
 		prioIn.SetValue(strconv.Itoa(prefill.Priority))
 	}
+	prioIn.Width = 40
 	inputs[dnsCreateStepPriority] = prioIn
 
 	// Notes input
 	notesIn := textinput.New()
 	notesIn.Placeholder = "Optional notes"
 	notesIn.SetValue(prefill.Notes)
+	notesIn.Width = 40
 	inputs[dnsCreateStepNotes] = notesIn
 
 	// Preset the opts type
@@ -145,6 +150,13 @@ func (m dnsRecordCreateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "ctrl+c":
 			return m, tea.Quit
+		case "q":
+			if m.step == dnsCreateStepType || m.step == dnsCreateStepConfirm {
+				if m.embedded {
+					return m, func() tea.Msg { return dnsNavigateBackMsg{} }
+				}
+				return m, tea.Quit
+			}
 		case "up", "k":
 			if m.step == dnsCreateStepType && m.cursor > 0 {
 				m.cursor--
@@ -385,12 +397,6 @@ func (m dnsRecordCreateModel) renderInputStep(title string) string {
 	in.TextStyle = styles.Value
 	in.PlaceholderStyle = styles.MutedText
 
-	if in.Focused() {
-		// Draw a border around it
-		view := in.View()
-		box := styles.CardActive.Render(view)
-		return fmt.Sprintf("  %s\n\n%s", styles.Subtitle.Render(title+":"), "  "+box)
-	}
 	return fmt.Sprintf("  %s\n\n  %s", styles.Subtitle.Render(title+":"), in.View())
 }
 
