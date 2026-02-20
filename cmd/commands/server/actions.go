@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"nathanbeddoewebdev/vpsm/internal/actionstore"
-	"nathanbeddoewebdev/vpsm/internal/providers"
-	"nathanbeddoewebdev/vpsm/internal/services/action"
+	"nathanbeddoewebdev/vpsm/internal/server/providers"
+	"nathanbeddoewebdev/vpsm/internal/server/services/action"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 
 	"github.com/spf13/cobra"

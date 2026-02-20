@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"nathanbeddoewebdev/vpsm/internal/auditlog"
-	"nathanbeddoewebdev/vpsm/internal/providers"
+	"nathanbeddoewebdev/vpsm/internal/server/providers"
 	"nathanbeddoewebdev/vpsm/internal/serverprefs"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 	prefssvc "nathanbeddoewebdev/vpsm/internal/services/serverprefs"

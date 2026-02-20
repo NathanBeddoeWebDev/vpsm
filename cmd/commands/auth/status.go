@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"nathanbeddoewebdev/vpsm/internal/providers"
+	providernames "nathanbeddoewebdev/vpsm/internal/platform/providers/names"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 	"nathanbeddoewebdev/vpsm/internal/tui"
 
@@ -34,7 +34,7 @@ Example:
 			}
 
 			// Non-interactive fallback.
-			providerNames := providers.List()
+			providerNames := providernames.List()
 
 			if len(providerNames) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "No providers registered.")

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"nathanbeddoewebdev/vpsm/internal/providers"
+	providernames "nathanbeddoewebdev/vpsm/internal/platform/providers/names"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
 	"nathanbeddoewebdev/vpsm/internal/tui/components"
 	"nathanbeddoewebdev/vpsm/internal/tui/styles"
@@ -35,7 +35,7 @@ type authStatusModel struct {
 
 // RunAuthStatus starts the full-window auth status TUI.
 func RunAuthStatus(store auth.Store) error {
-	providerNames := providers.List()
+	providerNames := providernames.List()
 
 	statuses := make([]providerStatus, 0, len(providerNames))
 	for _, name := range providerNames {

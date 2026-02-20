@@ -8,7 +8,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"nathanbeddoewebdev/vpsm/internal/domain"
+	"nathanbeddoewebdev/vpsm/internal/server/domain"
 
 	"github.com/spf13/cobra"
 )

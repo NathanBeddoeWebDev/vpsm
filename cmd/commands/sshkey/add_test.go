@@ -9,48 +9,25 @@ import (
 	"strings"
 	"testing"
 
-	"nathanbeddoewebdev/vpsm/internal/domain"
-	"nathanbeddoewebdev/vpsm/internal/providers"
+	platformsshkey "nathanbeddoewebdev/vpsm/internal/platform/sshkey"
 	"nathanbeddoewebdev/vpsm/internal/services/auth"
+	sshkeydomain "nathanbeddoewebdev/vpsm/internal/sshkey/domain"
+	"nathanbeddoewebdev/vpsm/internal/sshkey/providers"
 	"nathanbeddoewebdev/vpsm/internal/sshkeys"
 )
 
-// sshKeyMockProvider implements domain.Provider and domain.SSHKeyManager for testing.
+// sshKeyMockProvider implements ssh key provider behavior for testing.
 type sshKeyMockProvider struct {
 	displayName       string
 	createErr         error
-	createdKey        *domain.SSHKeySpec
+	createdKey        *platformsshkey.Spec
 	capturedName      string
 	capturedPublicKey string
 }
 
 func (m *sshKeyMockProvider) GetDisplayName() string { return m.displayName }
 
-func (m *sshKeyMockProvider) CreateServer(_ context.Context, opts domain.CreateServerOpts) (*domain.Server, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *sshKeyMockProvider) DeleteServer(_ context.Context, id string) error {
-	return fmt.Errorf("not implemented")
-}
-
-func (m *sshKeyMockProvider) GetServer(_ context.Context, id string) (*domain.Server, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *sshKeyMockProvider) ListServers(_ context.Context) ([]domain.Server, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *sshKeyMockProvider) StartServer(_ context.Context, _ string) (*domain.ActionStatus, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *sshKeyMockProvider) StopServer(_ context.Context, _ string) (*domain.ActionStatus, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *sshKeyMockProvider) CreateSSHKey(_ context.Context, name, publicKey string) (*domain.SSHKeySpec, error) {
+func (m *sshKeyMockProvider) CreateSSHKey(_ context.Context, name, publicKey string) (*platformsshkey.Spec, error) {
 	m.capturedName = name
 	m.capturedPublicKey = publicKey
 	if m.createErr != nil {
@@ -59,7 +36,7 @@ func (m *sshKeyMockProvider) CreateSSHKey(_ context.Context, name, publicKey str
 	if m.createdKey != nil {
 		return m.createdKey, nil
 	}
-	return &domain.SSHKeySpec{
+	return &platformsshkey.Spec{
 		ID:          "123",
 		Name:        name,
 		Fingerprint: "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99",
@@ -71,7 +48,7 @@ func registerSSHKeyMockProvider(t *testing.T, name string, mock *sshKeyMockProvi
 	t.Helper()
 	providers.Reset()
 	t.Cleanup(func() { providers.Reset() })
-	providers.Register(name, func(store auth.Store) (domain.Provider, error) {
+	providers.Register(name, func(store auth.Store) (sshkeydomain.Provider, error) {
 		return mock, nil
 	})
 }
@@ -276,26 +253,6 @@ func TestAddCommand_CreateError(t *testing.T) {
 	}
 }
 
-func TestAddCommand_ProviderNotSupported(t *testing.T) {
-	// Register a provider that doesn't implement SSHKeyManager
-	providers.Reset()
-	t.Cleanup(func() { providers.Reset() })
-
-	basicProvider := &basicMockProvider{displayName: "Basic"}
-	providers.Register("basic", func(store auth.Store) (domain.Provider, error) {
-		return basicProvider, nil
-	})
-
-	keyContent := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKeyData test@example.com"
-	keyPath := createTempSSHKey(t, keyContent)
-
-	_, stderr := execAdd(t, "basic", keyPath, "--name", "test")
-
-	if !strings.Contains(stderr, "does not support SSH key management") {
-		t.Errorf("expected unsupported provider error on stderr, got:\n%s", stderr)
-	}
-}
-
 func TestAddCommand_UnknownProvider(t *testing.T) {
 	providers.Reset()
 	t.Cleanup(func() { providers.Reset() })
@@ -305,33 +262,6 @@ func TestAddCommand_UnknownProvider(t *testing.T) {
 	if !strings.Contains(stderr, "unknown provider") {
 		t.Errorf("expected 'unknown provider' error on stderr, got:\n%s", stderr)
 	}
-}
-
-// basicMockProvider implements only domain.Provider (not SSHKeyManager).
-type basicMockProvider struct {
-	displayName string
-}
-
-func (m *basicMockProvider) GetDisplayName() string { return m.displayName }
-func (m *basicMockProvider) CreateServer(_ context.Context, opts domain.CreateServerOpts) (*domain.Server, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-func (m *basicMockProvider) DeleteServer(_ context.Context, id string) error {
-	return fmt.Errorf("not implemented")
-}
-func (m *basicMockProvider) GetServer(_ context.Context, id string) (*domain.Server, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-func (m *basicMockProvider) ListServers(_ context.Context) ([]domain.Server, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *basicMockProvider) StartServer(_ context.Context, _ string) (*domain.ActionStatus, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *basicMockProvider) StopServer(_ context.Context, _ string) (*domain.ActionStatus, error) {
-	return nil, fmt.Errorf("not implemented")
 }
 
 func TestSuggestKeyName(t *testing.T) {
