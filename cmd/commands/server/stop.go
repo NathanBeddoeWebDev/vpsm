@@ -7,6 +7,7 @@ import (
 	"os/signal"
 
 	"nathanbeddoewebdev/vpsm/internal/actionstore"
+	"nathanbeddoewebdev/vpsm/internal/auditlog"
 	"nathanbeddoewebdev/vpsm/internal/server/domain"
 	"nathanbeddoewebdev/vpsm/internal/server/providers"
 	"nathanbeddoewebdev/vpsm/internal/server/services/action"
@@ -80,6 +81,13 @@ func runStop(cmd *cobra.Command, args []string) error {
 	}
 
 	svc.FinalizeAction(record, domain.ActionStatusSuccess, "")
+
+	cmd.SetContext(auditlog.WithMetadata(cmd.Context(), auditlog.Metadata{
+		Provider:     providerName,
+		ResourceType: "server",
+		ResourceID:   serverID,
+	}))
+
 	fmt.Fprintf(cmd.OutOrStdout(), "Server %s stop initiated successfully.\n", serverID)
 	return nil
 }

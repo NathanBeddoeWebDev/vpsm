@@ -72,7 +72,7 @@ func RunServerList(provider domain.Provider, providerName string) (*domain.Serve
 		providerName: providerName,
 		loading:      true,
 		spinner:      s,
-		poller:       newTogglePoller(provider),
+		poller:       newTogglePoller(provider, providerName),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
