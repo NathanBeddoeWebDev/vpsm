@@ -5,6 +5,7 @@ import (
 
 	"nathanbeddoewebdev/vpsm/cmd/commands/auth"
 	cfgcmd "nathanbeddoewebdev/vpsm/cmd/commands/config"
+	"nathanbeddoewebdev/vpsm/cmd/commands/opencode"
 	"nathanbeddoewebdev/vpsm/cmd/commands/server"
 	"nathanbeddoewebdev/vpsm/cmd/commands/sshkey"
 	serverproviders "nathanbeddoewebdev/vpsm/internal/server/providers"
@@ -28,11 +29,13 @@ Quick start:
   vpsm auth login hetzner          # Store your API token
   vpsm server list                 # List all servers
   vpsm server create               # Interactive server creation
-  vpsm server delete               # Interactive server deletion`,
+  vpsm server delete               # Interactive server deletion
+  vpsm opencode create             # Provision an opencode AI coding VPS`,
 	}
 
 	cmd.AddCommand(auth.NewCommand())
 	cmd.AddCommand(cfgcmd.NewCommand())
+	cmd.AddCommand(opencode.NewCommand())
 	cmd.AddCommand(server.NewCommand())
 	cmd.AddCommand(sshkey.NewCommand())
 
